@@ -15,3 +15,5 @@ if(CMAKE_BUILD_TYPE_LOWER STREQUAL "debug")
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FLAGS_PUBLIC} ${FLAGS_RELEASE}")
 endif()
+
+add_subdirectory(vendor)
