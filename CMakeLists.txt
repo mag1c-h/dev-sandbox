@@ -17,3 +17,4 @@ else()
 endif()
 
 add_subdirectory(vendor)
+add_subdirectory(module)
