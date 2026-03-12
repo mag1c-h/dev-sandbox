@@ -61,7 +61,7 @@ public:
     }
     ~MmapAnonymousBuffer() override
     {
-        if (buffer_) { munmap(buffer_, size_); }
+        if (buffer_) { munmap(buffer_, size_ * number_); }
     }
     std::string ReadMe() const override { return "MmapAnonymousBuffer"; }
 };
@@ -82,7 +82,7 @@ public:
     }
     ~MmapSharedBuffer() override
     {
-        if (buffer_) { munmap(buffer_, size_); }
+        if (buffer_) { munmap(buffer_, size_ * number_); }
     }
     std::string ReadMe() const override { return "MmapSharedBuffer"; }
 };
