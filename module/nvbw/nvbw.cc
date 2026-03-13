@@ -29,6 +29,7 @@ int main(int argc, char const* argv[])
     param.deviceNumber = 8;
     param.bufferSize = 1024 * 1024;
     param.bufferNumber = 512;
+    param.iterations = 128;
 
     std::vector<MemcpyCase*> testcases = {
         new HostToDeviceMemcpyCase(),

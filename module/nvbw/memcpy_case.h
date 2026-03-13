@@ -167,12 +167,10 @@ public:
         std::vector<const MemoryBuffer*> srcBuffers(param.deviceNumber);
         std::vector<const MemoryBuffer*> dstBuffers(param.deviceNumber);
         for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
-            auto srcBuffer = new MmapSharedRegisteredBuffer(shmName, deviceId, param.bufferSize,
-                                                            param.bufferNumber);
-            auto dstBuffer =
+            srcBuffers[deviceId] = new MmapSharedRegisteredBuffer(
+                shmName, deviceId, param.bufferSize, param.bufferNumber);
+            dstBuffers[deviceId] =
                 new CudaDeviceMemoryBuffer(deviceId, param.bufferSize, param.bufferNumber);
-            srcBuffers[deviceId] = srcBuffer;
-            dstBuffers[deviceId] = dstBuffer;
         }
         result.Record(memcpyInstance.DoMemcpy(srcBuffers, dstBuffers));
         result.Show("memcpy CE CPU(mmap) -> GPU(all) bandwidth");
