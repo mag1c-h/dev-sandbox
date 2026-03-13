@@ -118,6 +118,30 @@ public:
     }
 };
 
+class AllHostToAllDeviceMemcpyCase : public MemcpyCase {
+public:
+    AllHostToAllDeviceMemcpyCase() : MemcpyCase("all_host_to_all_device_memcpy_ce") {}
+    void Run() override
+    {
+        auto& param = MemcpyParameterSet::Instance();
+        Host2DeviceCEMemcpyInitiator initiator;
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyResult result;
+        std::vector<const MemoryBuffer*> srcBuffers(param.deviceNumber);
+        std::vector<const MemoryBuffer*> dstBuffers(param.deviceNumber);
+        for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
+            srcBuffers[deviceId] =
+                new CudaHostMemoryBuffer(deviceId, param.bufferSize, param.bufferNumber);
+            dstBuffers[deviceId] =
+                new CudaDeviceMemoryBuffer(deviceId, param.bufferSize, param.bufferNumber);
+        }
+        result.Record(memcpyInstance.DoMemcpy(srcBuffers, dstBuffers));
+        result.Show("memcpy CE CPU(all) -> GPU(all) bandwidth");
+        for (auto& buffer : srcBuffers) { delete buffer; }
+        for (auto& buffer : dstBuffers) { delete buffer; }
+    }
+};
+
 class MmapToDeviceMemcpyCase : public MemcpyCase {
 public:
     MmapToDeviceMemcpyCase() : MemcpyCase("mmap_to_device_memcpy_ce") {}

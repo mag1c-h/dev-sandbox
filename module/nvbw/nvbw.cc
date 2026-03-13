@@ -35,6 +35,7 @@ int main(int argc, char const* argv[])
         new HostToDeviceMemcpyCase(),
         new Host0ToDeviceMemcpyCase(),
         new HostToAllDeviceMemcpyCase(),
+        new AllHostToAllDeviceMemcpyCase(),
         new MmapToDeviceMemcpyCase(),
         new Mmap0ToDeviceMemcpyCase(),
         new MmapToAllDeviceMemcpyCase(),
