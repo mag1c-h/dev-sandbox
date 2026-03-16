@@ -24,7 +24,9 @@
 #ifndef ACLBW_MEMCPY_RESULT_H
 #define ACLBW_MEMCPY_RESULT_H
 
+#include <algorithm>
 #include <fmt/format.h>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -41,6 +43,20 @@ public:
         double p50Ms;
         double p90Ms;
         double p99Ms;
+
+        Result() = default;
+        Result(std::string src, std::string dst, size_t elemSize, size_t elemCount,
+               std::vector<double>&& durations)
+            : src(std::move(src)), dst(std::move(dst)), elemSize(elemSize), elemCount(elemCount)
+        {
+            std::sort(durations.begin(), durations.end());
+            minMs = durations.front();
+            maxMs = durations.back();
+            avgMs = std::accumulate(durations.begin(), durations.end(), 0.f) / durations.size();
+            p50Ms = durations[durations.size() * 50 / 100];
+            p90Ms = durations[durations.size() * 90 / 100];
+            p99Ms = durations[durations.size() * 99 / 100];
+        }
     };
 
     void Record(Result result) { results_.push_back(std::move(result)); }

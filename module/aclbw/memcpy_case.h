@@ -42,6 +42,7 @@ public:
     }
 
     int32_t deviceNumber;
+    size_t streamNumber;
     size_t bufferSize;
     size_t bufferNumber;
     size_t iterations = 1024;
@@ -65,7 +66,8 @@ public:
     {
         auto& param = MemcpyParameterSet::Instance();
         Host2DeviceCEMemcpyInitiator initiator;
-        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, param.streamNumber,
+                                      &initiator};
         MemcpyResult result;
         for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
             AscendHostMemoryBuffer srcBuffer{deviceId, param.bufferSize, param.bufferNumber};
@@ -83,7 +85,8 @@ public:
     {
         auto& param = MemcpyParameterSet::Instance();
         Host2DeviceCEMemcpyInitiator initiator;
-        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, param.streamNumber,
+                                      &initiator};
         MemcpyResult result;
         std::vector<const MemoryBuffer*> srcBuffers(param.deviceNumber);
         std::vector<const MemoryBuffer*> dstBuffers(param.deviceNumber);
@@ -107,7 +110,8 @@ public:
     {
         auto& param = MemcpyParameterSet::Instance();
         Host2DeviceCEMemcpyInitiator initiator;
-        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, param.streamNumber,
+                                      &initiator};
         MemcpyResult result;
         for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
             MmapSharedRegisteredBuffer srcBuffer{deviceId, param.bufferSize, param.bufferNumber};
@@ -125,7 +129,8 @@ public:
     {
         auto& param = MemcpyParameterSet::Instance();
         Host2DeviceCEMemcpyInitiator initiator;
-        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, param.streamNumber,
+                                      &initiator};
         MemcpyResult result;
         const char* shmName = "aclbw_shared_buffer";
         std::vector<const MemoryBuffer*> srcBuffers(param.deviceNumber);

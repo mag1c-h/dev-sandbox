@@ -27,7 +27,8 @@ int main(int argc, char const* argv[])
 {
     auto& param = MemcpyParameterSet::Instance();
     param.deviceNumber = 8;
-    param.bufferSize = 1024 * 1024;
+    param.streamNumber = 8;
+    param.bufferSize = 144 * 1024;
     param.bufferNumber = 512;
     param.iterations = 128;
 

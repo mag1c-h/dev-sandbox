@@ -29,33 +29,28 @@
 class MemcpyInitiator {
 public:
     virtual ~MemcpyInitiator() = default;
-    virtual void Copy(const MemoryBuffer& src, const MemoryBuffer& dst,
-                      aclrtStream stream) const = 0;
+    virtual void Copy(void* src, void* dst, size_t size, aclrtStream stream) const = 0;
+    virtual void Copy(const MemoryBuffer& src, const MemoryBuffer& dst, aclrtStream stream) const
+    {
+        for (size_t i = 0; i < src.Number(); ++i) { Copy(src[i], dst[i], src.Size(), stream); }
+    }
 };
 
 class Host2DeviceCEMemcpyInitiator : public MemcpyInitiator {
 public:
-    void Copy(const MemoryBuffer& src, const MemoryBuffer& dst, aclrtStream stream) const override
+    void Copy(void* src, void* dst, size_t size, aclrtStream stream) const override
     {
-        ACLBW_ASSERT(src.Size() == dst.Size());
-        ACLBW_ASSERT(src.Number() == dst.Number());
-        for (size_t i = 0; i < src.Number(); ++i) {
-            ACLBW_ASCEND_ASSERT(aclrtMemcpyAsync(dst[i], dst.Size(), src[i], src.Size(),
-                                                 ACL_MEMCPY_HOST_TO_DEVICE, stream));
-        }
+        ACLBW_ASCEND_ASSERT(
+            aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_HOST_TO_DEVICE, stream));
     }
 };
 
 class Device2HostCEMemcpyInitiator : public MemcpyInitiator {
 public:
-    void Copy(const MemoryBuffer& src, const MemoryBuffer& dst, aclrtStream stream) const override
+    void Copy(void* src, void* dst, size_t size, aclrtStream stream) const override
     {
-        ACLBW_ASSERT(src.Size() == dst.Size());
-        ACLBW_ASSERT(src.Number() == dst.Number());
-        for (size_t i = 0; i < src.Number(); ++i) {
-            ACLBW_ASCEND_ASSERT(aclrtMemcpyAsync(dst[i], dst.Size(), src[i], src.Size(),
-                                                 ACL_MEMCPY_DEVICE_TO_HOST, stream));
-        }
+        ACLBW_ASCEND_ASSERT(
+            aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_DEVICE_TO_HOST, stream));
     }
 };
 
