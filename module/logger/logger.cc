@@ -22,14 +22,45 @@
  * SOFTWARE.
  * */
 #include "logger.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
+#include <functional>
+#include <libgen.h>
 #include <list>
 #include <mutex>
+#include <pthread.h>
+#include <shared_mutex>
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_set>
+#include <vector>
+
+static std::shared_mutex gLoggerRegistryMtx;
+static std::unordered_set<LoggerImpl*> gLoggerRegistry;
+
+static void PrepareFork();
+static void ParentFork();
+static void ChildFork();
+
+static void RegisterLoggerImpl(LoggerImpl* impl)
+{
+    {
+        std::unique_lock lock(gLoggerRegistryMtx);
+        gLoggerRegistry.insert(impl);
+    }
+    static std::once_flag afForkOnce;
+    std::call_once(afForkOnce, [] { pthread_atfork(PrepareFork, ParentFork, ChildFork); });
+}
+
+static void UnregisterLoggerImpl(LoggerImpl* impl)
+{
+    std::unique_lock lock(gLoggerRegistryMtx);
+    gLoggerRegistry.erase(impl);
+}
 
 class LoggerImpl {
     using Buffer = std::list<std::string>;
@@ -78,8 +109,13 @@ class LoggerImpl {
     }
 
 public:
-    LoggerImpl() : worker_([this] { WorkerLoop(); }) {}
+    LoggerImpl() { RegisterLoggerImpl(this); }
     ~LoggerImpl()
+    {
+        UnregisterLoggerImpl(this);
+        StopAndJoinWorker();
+    }
+    void StopAndJoinWorker()
     {
         {
             std::lock_guard lg(mtx_);
@@ -89,8 +125,26 @@ public:
         }
         if (worker_.joinable()) { worker_.join(); }
     }
+    void ResetAfterForkInChild()
+    {
+        std::lock_guard lg(mtx_);
+        stop_ = false;
+        frontBuf_.clear();
+        backBuf_.clear();
+        lastFlush_ = SteadyClock::now();
+    }
+    void EnsureWorkerRunning()
+    {
+        std::lock_guard lg(mtx_);
+        if (!worker_.joinable() && !stop_) {
+            lastFlush_ = SteadyClock::now();
+            worker_ = std::thread([this] { WorkerLoop(); });
+        }
+    }
+
     void Log(Logger::Level lv, const Logger::SourceLocation& loc, const std::string& message)
     {
+        EnsureWorkerRunning();
         static const char* lvStrs[] = {"D", "I", "W", "E", "C"};
         static const size_t pid = static_cast<size_t>(getpid());
         static thread_local const size_t tid = syscall(SYS_gettid);
@@ -109,7 +163,7 @@ public:
             std::chrono::duration_cast<std::chrono::microseconds>(systemNow - currentSec).count();
         auto payload = fmt::format("[{}.{:06d}][{}] {} [{},{}][{},{}:{}]\n", datetime, us,
                                    lvStrs[fmt::underlying(lv)], message, pid, tid, loc.func,
-                                   basename(loc.file), loc.line);
+                                   basename(const_cast<char*>(loc.file)), loc.line);
         auto steadyNow = SteadyClock::now();
         std::lock_guard lg(mtx_);
         frontBuf_.push_back(std::move(payload));
@@ -122,6 +176,34 @@ public:
         }
     }
 };
+
+static void ForEachRegisteredSnapshot(const std::function<void(LoggerImpl*)>& fn)
+{
+    std::vector<LoggerImpl*> snapshot;
+    {
+        std::shared_lock lock(gLoggerRegistryMtx);
+        snapshot.reserve(gLoggerRegistry.size());
+        for (auto p : gLoggerRegistry) snapshot.push_back(p);
+    }
+    for (auto p : snapshot) {
+        if (p) { fn(p); }
+    }
+}
+
+static void PrepareFork()
+{
+    ForEachRegisteredSnapshot([](LoggerImpl* impl) { impl->StopAndJoinWorker(); });
+}
+static void ParentFork()
+{
+    // Intentionally do nothing: worker threads are lazily started on first log
+    // in both parent and child. This keeps behavior consistent and avoids
+    // creating threads inside atfork handlers.
+}
+static void ChildFork()
+{
+    ForEachRegisteredSnapshot([](LoggerImpl* impl) { impl->ResetAfterForkInChild(); });
+}
 
 Logger::Logger() : impl_(std::make_unique<LoggerImpl>()) {}
 
