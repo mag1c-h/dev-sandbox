@@ -46,8 +46,8 @@ public:
         Callback callback;
     };
 
+    AioImpl();
     ~AioImpl();
-    void Setup();
     void ReadAsync(Io&& io);
     void WriteAsync(Io&& io);
 

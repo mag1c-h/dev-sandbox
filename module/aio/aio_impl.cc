@@ -74,6 +74,20 @@ static inline void AioSetEventFd(struct iocb* iocb, int32_t eventfd)
     iocb->aio_resfd = eventfd;
 }
 
+AioImpl::AioImpl()
+{
+    AIO_ASSERT(AioSetup(queueDepth_, &ctx_) == 0);
+    eventFd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    AIO_ASSERT(eventFd_ >= 0);
+    epollFd_ = epoll_create1(EPOLL_CLOEXEC);
+    AIO_ASSERT(epollFd_ >= 0);
+    epoll_event ev{};
+    ev.events = EPOLLIN;
+    ev.data.ptr = nullptr;
+    AIO_ASSERT(epoll_ctl(epollFd_, EPOLL_CTL_ADD, eventFd_, &ev) == 0);
+    eventThread_ = std::thread([this] { CompletionLoop(); });
+}
+
 AioImpl::~AioImpl()
 {
     stop_ = true;
@@ -86,20 +100,6 @@ AioImpl::~AioImpl()
     if (epollFd_ >= 0) { close(epollFd_); }
     if (eventFd_ >= 0) { close(eventFd_); }
     if (ctx_) { AioDestroy(ctx_); }
-}
-
-void AioImpl::Setup()
-{
-    AIO_ASSERT(AioSetup(queueDepth_, &ctx_) == 0);
-    eventFd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    AIO_ASSERT(eventFd_ >= 0);
-    epollFd_ = epoll_create1(EPOLL_CLOEXEC);
-    AIO_ASSERT(epollFd_ >= 0);
-    epoll_event ev{};
-    ev.events = EPOLLIN;
-    ev.data.ptr = nullptr;
-    AIO_ASSERT(epoll_ctl(epollFd_, EPOLL_CTL_ADD, eventFd_, &ev) == 0);
-    eventThread_ = std::thread([this] { CompletionLoop(); });
 }
 
 void AioImpl::ReadAsync(Io&& io)
