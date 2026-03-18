@@ -1,4 +1,6 @@
 add_executable(aio aio_main.cc)
+target_sources(aio PRIVATE aio_impl.cc)
+target_link_libraries(aio PRIVATE fmt::fmt)
 set(CUDA_ROOT "/usr/local/cuda/" CACHE PATH "Path to CUDA root directory")
 set(ASCEND_ROOT "/usr/local/Ascend/ascend-toolkit/latest" CACHE PATH "Path to Ascend root directory")
 find_path(CUDA_RUNTIME_API_PATH cuda_runtime.h ${CUDA_ROOT}/include)
