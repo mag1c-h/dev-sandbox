@@ -21,37 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#ifndef AIO_HOST_BUFFER_H
-#define AIO_HOST_BUFFER_H
+#ifndef AIO_ERROR_HANDLE_H
+#define AIO_ERROR_HANDLE_H
 
-#include <cstddef>
-#include <cstdint>
+#include <cerrno>
+#include <cstdio>
 
-namespace aio {
+#define AIO_ASSERT(expr)                                                                    \
+    do {                                                                                    \
+        if (!(expr)) {                                                                      \
+            fprintf(stderr, "Assertion failed(%d): %s, at %s:%d\n", errno, #expr, __FILE__, \
+                    __LINE__);                                                              \
+            exit(EXIT_FAILURE);                                                             \
+        }                                                                                   \
+    } while (0)
 
-class HostBuffer {
-public:
-    enum class Strategy : uint8_t { ALLOC, MMAP };
-
-    HostBuffer(Strategy strategy, int32_t deviceId, size_t size, size_t number);
-    ~HostBuffer();
-    HostBuffer(const HostBuffer&) = delete;
-    HostBuffer& operator=(const HostBuffer&) = delete;
-    HostBuffer(HostBuffer&&) = delete;
-    HostBuffer& operator=(HostBuffer&&) = delete;
-    size_t Size() const { return size_; }
-    size_t Number() const { return number_; }
-    void* Buffer() const { return buffer_; }
-    void* operator[](size_t index) const { return static_cast<char*>(buffer_) + index * size_; }
-
-private:
-    Strategy strategy_;
-    int32_t deviceId_;
-    size_t size_;
-    size_t number_;
-    void* buffer_;
-};
-
-}  // namespace aio
-
-#endif  // AIO_HOST_BUFFER_H
+#endif  // AIO_ERROR_HANDLE_H
