@@ -68,7 +68,8 @@ private:
     }
     static void MkDir(const std::string& dir)
     {
-        AIO_ASSERT(mkdir(dir.c_str(), (S_IRWXU | S_IRWXG | S_IROTH)) == 0);
+        auto ret = mkdir(dir.c_str(), (S_IRWXU | S_IRWXG | S_IROTH));
+        AIO_ASSERT(ret == 0 || errno == EEXIST);
     }
 
     const size_t shardSize_{3};

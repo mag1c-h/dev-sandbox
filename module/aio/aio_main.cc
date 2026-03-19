@@ -26,6 +26,138 @@
 #include "aio_engine.h"
 #include "host_buffer.h"
 
+struct Config {
+    std::string workspace;
+    aio::HostBuffer::Strategy ioType = aio::HostBuffer::Strategy::MMAP;
+    size_t ioSize = 1024 * 1024;
+    size_t ioNumber = 512;
+    size_t deviceId = 0;
+    size_t epochNumber = 32;
+
+    bool Parse(int argc, char const* argv[])
+    {
+        auto PrintUsage = +[](const char* prog) {
+            fmt::println(
+                "Usage: {} --workspace <path> [--io-type mmap|alloc] [--io-size <bytes>] "
+                "[--io-number <n>] [--device-id <id>] [--epoch-number <n>]",
+                prog ? prog : "aio_main");
+        };
+        for (int i = 1; i < argc; ++i) {
+            std::string opt = argv[i];
+            if (opt == "-h" || opt == "--help") {
+                PrintUsage(argv[0]);
+                return false;
+            }
+
+            if (opt == "--workspace") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --workspace");
+                    return false;
+                }
+                workspace = argv[++i];
+                continue;
+            }
+
+            if (opt == "--io-type") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --io-type");
+                    return false;
+                }
+                std::string v = argv[++i];
+                for (auto& c : v) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (v == "mmap") {
+                    ioType = aio::HostBuffer::Strategy::MMAP;
+                } else if (v == "alloc") {
+                    ioType = aio::HostBuffer::Strategy::ALLOC;
+                } else {
+                    fmt::println("Unknown io-type: {}. Supported: mmap, alloc", v);
+                    return false;
+                }
+                continue;
+            }
+
+            if (opt == "--io-size") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --io-size");
+                    return false;
+                }
+                try {
+                    ioSize = std::stoull(argv[++i]);
+                } catch (const std::exception& e) {
+                    fmt::println("Invalid number for --io-size: {}", e.what());
+                    return false;
+                }
+                continue;
+            }
+
+            if (opt == "--io-number") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --io-number");
+                    return false;
+                }
+                try {
+                    ioNumber = std::stoull(argv[++i]);
+                } catch (const std::exception& e) {
+                    fmt::println("Invalid number for --io-number: {}", e.what());
+                    return false;
+                }
+                continue;
+            }
+
+            if (opt == "--device-id") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --device-id");
+                    return false;
+                }
+                try {
+                    deviceId = std::stoull(argv[++i]);
+                } catch (const std::exception& e) {
+                    fmt::println("Invalid number for --device-id: {}", e.what());
+                    return false;
+                }
+                continue;
+            }
+
+            if (opt == "--epoch-number") {
+                if (i + 1 >= argc) {
+                    fmt::println("Missing value for --epoch-number");
+                    return false;
+                }
+                try {
+                    epochNumber = std::stoull(argv[++i]);
+                } catch (const std::exception& e) {
+                    fmt::println("Invalid number for --epoch-number: {}", e.what());
+                    return false;
+                }
+                continue;
+            }
+
+            fmt::println("Unknown option: {}", opt);
+            return false;
+        }
+
+        if (workspace.empty()) {
+            fmt::println("Error: --workspace is required");
+            PrintUsage(argv[0]);
+            return false;
+        }
+
+        return true;
+    }
+    void Show() const
+    {
+        fmt::println("Set Config::Workspace = {}.", workspace);
+        fmt::println("Set Config::IoType = {}.",
+                     ioType == aio::HostBuffer::Strategy::ALLOC ? "alloc" : "mmap");
+        fmt::println("Set Config::IoSize = {}.", ioSize);
+        fmt::println("Set Config::IoNumber = {}.", ioNumber);
+        fmt::println("Set Config::DeviceId = {}.", deviceId);
+        fmt::println("Set Config::EpochNumber = {}.", epochNumber);
+    }
+};
+
 std::vector<aio::BlockId> MakeBlockIdsRandomly(size_t number)
 {
     auto makeBlockIdRandomly = +[] {
@@ -66,25 +198,24 @@ void Run(aio::AioEngine& ioEngine, aio::AioEngine::IoTask& task, size_t epochNum
 
 int main(int argc, char const* argv[])
 {
-    const char* workspace = "./build/data";
-    const auto ioType = aio::HostBuffer::Strategy::MMAP;
-    const size_t ioSize = 1024 * 1024;
-    const size_t ioNumber = 512;
-    const size_t deviceId = 0;
-    const size_t epochNumber = 32;
+    Config config;
+    if (config.Parse(argc, argv)) {
+        config.Show();
 
-    aio::SpaceLayout layout{std::string(workspace)};
-    aio::AioEngine ioEngine{&layout, 32};
-    aio::HostBuffer buffers{ioType, deviceId, ioSize, ioNumber};
-    auto blockIds = MakeBlockIdsRandomly(ioNumber);
-    aio::AioEngine::IoTask task;
-    task.reserve(ioNumber);
-    for (size_t i = 0; i < ioNumber; i++) {
-        task.push_back(aio::AioEngine::IoShard{blockIds[i], buffers[i], ioSize});
+        aio::SpaceLayout layout{config.workspace};
+        aio::AioEngine ioEngine{&layout, 32};
+        aio::HostBuffer buffers{config.ioType, (int32_t)config.deviceId, config.ioSize,
+                                config.ioNumber};
+        auto blockIds = MakeBlockIdsRandomly(config.ioNumber);
+        aio::AioEngine::IoTask task;
+        task.reserve(config.ioNumber);
+        for (size_t i = 0; i < config.ioNumber; i++) {
+            task.push_back(aio::AioEngine::IoShard{blockIds[i], buffers[i], config.ioSize});
+        }
+
+        Run<true>(ioEngine, task, config.epochNumber);
+        Run<false>(ioEngine, task, config.epochNumber);
+        return 0;
     }
-
-    Run<true>(ioEngine, task, epochNumber);
-    Run<false>(ioEngine, task, epochNumber);
-
-    return 0;
+    return -1;
 }
