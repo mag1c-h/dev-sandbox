@@ -96,9 +96,17 @@ class MemcpyInstance {
             if (i != 0) {
                 ACLBW_ASCEND_ASSERT(aclrtStreamWaitEvent(contexts[i].stream, totalStart));
             }
-            for (const auto& io : contexts[i].ioArray) {
-                initiator.Copy(io.src, io.dst, io.size, contexts[i].stream);
+            const auto ioNumber = contexts[i].ioArray.size();
+            const auto ioSize = contexts[i].ioArray.front().size;
+            std::vector<void*> srcArray(ioNumber, nullptr);
+            std::vector<void*> dstArray(ioNumber, nullptr);
+            std::vector<size_t> sizeArray(ioNumber, ioSize);
+            for (size_t j = 0; j < ioNumber; j++) {
+                srcArray[j] = contexts[i].ioArray[j].src;
+                dstArray[j] = contexts[i].ioArray[j].dst;
             }
+            initiator.Copy(srcArray.data(), dstArray.data(), sizeArray.data(), ioNumber,
+                           contexts[i].stream);
             if (i != 0) {
                 ACLBW_ASCEND_ASSERT(aclrtRecordEvent(contexts[i].endEvent, contexts[i].stream));
                 ACLBW_ASCEND_ASSERT(aclrtSetDevice(contexts[0].deviceId));
@@ -150,9 +158,7 @@ public:
                 std::move(durations)};
     }
     MemcpyResult::Result DoMemcpy(const MemoryBuffer& srcBuffer, const MemoryBuffer& dstBuffer)
-    {
-        return DoMemcpy({&srcBuffer}, {&dstBuffer});
-    }
+    { return DoMemcpy({&srcBuffer}, {&dstBuffer}); }
 };
 
 #endif  // ACLBW_MEMCPY_INSTANCE_H

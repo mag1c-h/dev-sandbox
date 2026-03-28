@@ -30,6 +30,10 @@ class MemcpyInitiator {
 public:
     virtual ~MemcpyInitiator() = default;
     virtual void Copy(void* src, void* dst, size_t size, aclrtStream stream) const = 0;
+    virtual void Copy(void** src, void** dst, size_t* size, size_t number, aclrtStream stream) const
+    {
+        for (size_t i = 0; i < number; i++) { Copy(src[i], dst[i], size[i], stream); }
+    }
     virtual void Copy(const MemoryBuffer& src, const MemoryBuffer& dst, aclrtStream stream) const
     {
         for (size_t i = 0; i < src.Number(); ++i) { Copy(src[i], dst[i], src.Size(), stream); }
