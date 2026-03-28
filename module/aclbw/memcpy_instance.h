@@ -82,6 +82,23 @@ class MemcpyInstance {
         }
         return contexts;
     }
+    static void SubmitIoBatch(const MemcpyInitiator& initiator,
+                              const std::vector<MemcpyIo>& ioArray, uint32_t deviceId,
+                              aclrtStream stream)
+    {
+        if (ioArray.empty()) { return; }
+        const auto ioNumber = ioArray.size();
+        const auto ioSize = ioArray.front().size;
+        std::vector<void*> srcArray(ioNumber, nullptr);
+        std::vector<void*> dstArray(ioNumber, nullptr);
+        std::vector<size_t> sizeArray(ioNumber, ioSize);
+        for (size_t i = 0; i < ioNumber; i++) {
+            srcArray[i] = ioArray[i].src;
+            dstArray[i] = ioArray[i].dst;
+        }
+        initiator.Copy(srcArray.data(), dstArray.data(), sizeArray.data(), ioNumber, deviceId,
+                       stream);
+    }
     static double ExecuteMemcpy(const MemcpyInitiator& initiator,
                                 const std::vector<MemcpyStreamContext>& contexts)
     {
@@ -96,17 +113,7 @@ class MemcpyInstance {
             if (i != 0) {
                 ACLBW_ASCEND_ASSERT(aclrtStreamWaitEvent(contexts[i].stream, totalStart));
             }
-            const auto ioNumber = contexts[i].ioArray.size();
-            const auto ioSize = contexts[i].ioArray.front().size;
-            std::vector<void*> srcArray(ioNumber, nullptr);
-            std::vector<void*> dstArray(ioNumber, nullptr);
-            std::vector<size_t> sizeArray(ioNumber, ioSize);
-            for (size_t j = 0; j < ioNumber; j++) {
-                srcArray[j] = contexts[i].ioArray[j].src;
-                dstArray[j] = contexts[i].ioArray[j].dst;
-            }
-            initiator.Copy(srcArray.data(), dstArray.data(), sizeArray.data(), ioNumber,
-                           contexts[i].stream);
+            SubmitIoBatch(initiator, contexts[i].ioArray, contexts[i].deviceId, contexts[i].stream);
             if (i != 0) {
                 ACLBW_ASCEND_ASSERT(aclrtRecordEvent(contexts[i].endEvent, contexts[i].stream));
                 ACLBW_ASCEND_ASSERT(aclrtSetDevice(contexts[0].deviceId));
@@ -158,7 +165,9 @@ public:
                 std::move(durations)};
     }
     MemcpyResult::Result DoMemcpy(const MemoryBuffer& srcBuffer, const MemoryBuffer& dstBuffer)
-    { return DoMemcpy({&srcBuffer}, {&dstBuffer}); }
+    {
+        return DoMemcpy({&srcBuffer}, {&dstBuffer});
+    }
 };
 
 #endif  // ACLBW_MEMCPY_INSTANCE_H

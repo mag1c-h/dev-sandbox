@@ -24,13 +24,16 @@
 #ifndef ACLBW_MEMCPY_INITIATOR_H
 #define ACLBW_MEMCPY_INITIATOR_H
 
+#include <cstring>
+#include <vector>
 #include "memory_buffer.h"
 
 class MemcpyInitiator {
 public:
     virtual ~MemcpyInitiator() = default;
     virtual void Copy(void* src, void* dst, size_t size, aclrtStream stream) const = 0;
-    virtual void Copy(void** src, void** dst, size_t* size, size_t number, aclrtStream stream) const
+    virtual void Copy(void** src, void** dst, size_t* size, size_t number, uint32_t deviceId,
+                      aclrtStream stream) const
     {
         for (size_t i = 0; i < number; i++) { Copy(src[i], dst[i], size[i], stream); }
     }
@@ -46,6 +49,25 @@ public:
     {
         ACLBW_ASCEND_ASSERT(
             aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_HOST_TO_DEVICE, stream));
+    }
+};
+
+class Host2DeviceCEMemcpyBatchInitiator : public Host2DeviceCEMemcpyInitiator {
+public:
+    void Copy(void** src, void** dst, size_t* size, size_t number, uint32_t deviceId,
+              aclrtStream stream) const override
+    {
+        aclrtMemcpyBatchAttr attr;
+        memset(&attr, 0, sizeof(attr));
+        attr.srcLoc.type = ACL_MEM_LOCATION_TYPE_HOST;
+        attr.dstLoc.type = ACL_MEM_LOCATION_TYPE_DEVICE;
+        attr.dstLoc.id = deviceId;
+        std::vector<aclrtMemcpyBatchAttr> attrArray{attr};
+        std::vector<size_t> attrIdxArray(number, 0);
+        size_t failureIdx = 0;
+        ACLBW_ASCEND_ASSERT(aclrtMemcpyBatchAsync(dst, size, src, size, number, attrArray.data(),
+                                                  attrIdxArray.data(), attrArray.size(),
+                                                  &failureIdx, stream));
     }
 };
 

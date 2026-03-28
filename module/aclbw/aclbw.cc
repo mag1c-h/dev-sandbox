@@ -35,9 +35,8 @@ int main(int argc, char const* argv[])
     ACLBW_ASCEND_ASSERT(aclInit(nullptr));
 
     std::vector<MemcpyCase*> testcases = {
-        new HostToDeviceMemcpyCase(),
-        new AllHostToAllDeviceMemcpyCase(),
-        new MmapToDeviceMemcpyCase(),
+        new HostToDeviceMemcpyCase(),       new HostToDeviceMemcpyBatchCase(),
+        new AllHostToAllDeviceMemcpyCase(), new MmapToDeviceMemcpyCase(),
         new MmapToAllDeviceMemcpyCase(),
     };
 

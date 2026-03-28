@@ -78,6 +78,25 @@ public:
     }
 };
 
+class HostToDeviceMemcpyBatchCase : public MemcpyCase {
+public:
+    HostToDeviceMemcpyBatchCase() : MemcpyCase("host_to_device_memcpy_batch_ce") {}
+    void Run() override
+    {
+        auto& param = MemcpyParameterSet::Instance();
+        Host2DeviceCEMemcpyBatchInitiator initiator;
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, param.streamNumber,
+                                      &initiator};
+        MemcpyResult result;
+        for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
+            AscendHostMemoryBuffer srcBuffer{deviceId, param.bufferSize, param.bufferNumber};
+            AscendDeviceMemoryBuffer dstBuffer{deviceId, param.bufferSize, param.bufferNumber};
+            result.Record(memcpyInstance.DoMemcpy(srcBuffer, dstBuffer));
+        }
+        result.Show("memcpy batch CE CPU -> GPU(row) bandwidth");
+    }
+};
+
 class AllHostToAllDeviceMemcpyCase : public MemcpyCase {
 public:
     AllHostToAllDeviceMemcpyCase() : MemcpyCase("all_host_to_all_device_memcpy_ce") {}
