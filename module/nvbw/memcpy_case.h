@@ -76,6 +76,24 @@ public:
     }
 };
 
+class Device0ToDeviceMemcpyCase : public MemcpyCase {
+public:
+    Device0ToDeviceMemcpyCase() : MemcpyCase("device0_to_device_memcpy_ce") {}
+    void Run() override
+    {
+        auto& param = MemcpyParameterSet::Instance();
+        Device2DeviceCEMemcpyInitiator initiator;
+        MemcpyInstance memcpyInstance{param.iterations, param.warmup, &initiator};
+        MemcpyResult result;
+        CudaDeviceMemoryBuffer srcBuffer{0, param.bufferSize, param.bufferNumber};
+        for (auto deviceId = 0; deviceId < param.deviceNumber; deviceId++) {
+            CudaDeviceMemoryBuffer dstBuffer{deviceId, param.bufferSize, param.bufferNumber};
+            result.Record(memcpyInstance.DoMemcpy(srcBuffer, dstBuffer));
+        }
+        result.Show("memcpy CE GPU(0) -> GPU(row) bandwidth");
+    }
+};
+
 class Host0ToDeviceMemcpyCase : public MemcpyCase {
 public:
     Host0ToDeviceMemcpyCase() : MemcpyCase("host0_to_device_memcpy_ce") {}

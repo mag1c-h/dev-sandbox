@@ -27,12 +27,13 @@ int main(int argc, char const* argv[])
 {
     auto& param = MemcpyParameterSet::Instance();
     param.deviceNumber = 8;
-    param.bufferSize = 1024 * 1024;
-    param.bufferNumber = 512;
+    param.bufferSize = 512 * 1024 * 1024;
+    param.bufferNumber = 8;
     param.iterations = 128;
 
     std::vector<MemcpyCase*> testcases = {
         new HostToDeviceMemcpyCase(),
+        new Device0ToDeviceMemcpyCase(),
         new Host0ToDeviceMemcpyCase(),
         new HostToAllDeviceMemcpyCase(),
         new AllHostToAllDeviceMemcpyCase(),

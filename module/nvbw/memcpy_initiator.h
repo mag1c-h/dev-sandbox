@@ -59,4 +59,17 @@ public:
     }
 };
 
+class Device2DeviceCEMemcpyInitiator : public MemcpyInitiator {
+public:
+    void Copy(const MemoryBuffer& src, const MemoryBuffer& dst, cudaStream_t stream) const override
+    {
+        NVBW_ASSERT(src.Size() == dst.Size());
+        NVBW_ASSERT(src.Number() == dst.Number());
+        for (size_t i = 0; i < src.Number(); ++i) {
+            NVBW_CUDA_ASSERT(
+                cudaMemcpyAsync(dst[i], src[i], src.Size(), cudaMemcpyDeviceToDevice, stream));
+        }
+    }
+};
+
 #endif  // NVBW_MEMCPY_INITIATOR_H
