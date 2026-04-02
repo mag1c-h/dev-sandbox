@@ -35,7 +35,7 @@ public:
 
 class CudaMemcpyHost2DeviceCopyInitiator : public CopyInitiator {
 public:
-    std::string Name() const override { return "CudaMemcpyHost2Device"; }
+    std::string Name() const override { return "CE"; }
     void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
     {
         CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice, stream));
@@ -44,10 +44,19 @@ public:
 
 class CudaMemcpyDevice2HostCopyInitiator : public CopyInitiator {
 public:
-    std::string Name() const override { return "CudaMemcpyDevice2Host"; }
+    std::string Name() const override { return "CE"; }
     void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
     {
         CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToHost, stream));
+    }
+};
+
+class CudaMemcpyDevice2DeviceCopyInitiator : public CopyInitiator {
+public:
+    std::string Name() const override { return "CE"; }
+    void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
+    {
+        CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream));
     }
 };
 

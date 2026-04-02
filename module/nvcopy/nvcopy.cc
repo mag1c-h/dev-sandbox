@@ -43,6 +43,22 @@ int main(int argc, char const* argv[])
         std::make_shared<OneHost2AllDeviceCECopyCase<1024 * 1024, 1024, 32>>("H2D1MIoCE"),
         std::make_shared<OneHost2AllDeviceCECopyCase<8 * 1024 * 1024, 512, 16>>("H2D8MIoCE"),
         std::make_shared<OneHost2AllDeviceCECopyCase<512 * 1024 * 1024, 8, 8>>("H2D512MIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<4 * 1024, 2048, 1024>>("D2D4KIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<16 * 1024, 2048, 1024>>("D2D16KIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<32 * 1024, 2048, 512>>("D2D32KIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<64 * 1024, 2048, 256>>("D2D64KIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<128 * 1024, 2048, 128>>("D2D128KIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<1024 * 1024, 1024, 32>>("D2D1MIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<8 * 1024 * 1024, 512, 16>>("D2D8MIoCE"),
+        std::make_shared<Device2DeviceCECopyCase<512 * 1024 * 1024, 8, 8>>("D2D512MIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<4 * 1024, 2048, 1024>>("D2D4KIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<16 * 1024, 2048, 1024>>("D2D16KIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<32 * 1024, 2048, 512>>("D2D32KIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<64 * 1024, 2048, 256>>("D2D64KIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<128 * 1024, 2048, 128>>("D2D128KIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<1024 * 1024, 1024, 32>>("D2D1MIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<8 * 1024 * 1024, 512, 16>>("D2D8MIoCE"),
+        std::make_shared<OneDevice2AllDeviceCECopyCase<512 * 1024 * 1024, 8, 8>>("D2D512MIoCE"),
     };
 
     for (auto test : cases) { test->Run(); }
