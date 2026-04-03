@@ -85,6 +85,38 @@ public:
 };
 
 template <size_t Size, size_t Num, size_t Iter>
+class AllHost2AllDeviceCECopyCase : public CopyCase {
+    std::string name_;
+    size_t deviceNumber_;
+    size_t warmup_;
+
+public:
+    explicit AllHost2AllDeviceCECopyCase(std::string name, size_t deviceNumber = 8,
+                                         size_t warmup = 3)
+        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    {
+    }
+    void Run() const override
+    {
+        CudaMemcpyHost2DeviceCopyInitiator initiator;
+        CopyInstance instance{&initiator, warmup_, Iter, false};
+        std::vector<const CopyBuffer*> srcBuffers(deviceNumber_);
+        std::vector<const CopyBuffer*> dstBuffers(deviceNumber_);
+        for (size_t device = 0; device < deviceNumber_; device++) {
+            srcBuffers[device] = new CudaHostCopyBuffer{device, Size, Num};
+            dstBuffers[device] = new CudaDeviceCopyBuffer{device, Size, Num};
+        }
+        CopyResult result;
+        result.Push(instance.DoCopy(srcBuffers, dstBuffers));
+        for (size_t device = 0; device < deviceNumber_; device++) {
+            delete srcBuffers[device];
+            delete dstBuffers[device];
+        }
+        result.Show("[[ " + name_ + " ]] - All to All");
+    }
+};
+
+template <size_t Size, size_t Num, size_t Iter>
 class Device2DeviceCECopyCase : public CopyCase {
     std::string name_;
     size_t deviceNumber_;
