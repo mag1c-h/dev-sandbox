@@ -22,65 +22,86 @@
  * SOFTWARE.
  * */
 #include <memory>
+#include <unordered_map>
 #include "copy_case.h"
 
-#define KB *1024
-#define MB *(1024 KB)
+struct CaseArgs {
+    std::string name;
+    size_t ioSize{512 * 1024 * 1024};
+    size_t ioNumber{8};
+    size_t iterNumber{128};
+    size_t deviceNumber{8};
+
+    static void Help(const char* proc)
+    {
+        fmt::println("Usage: {} [options]", proc);
+        fmt::println("Options:");
+        fmt::println("  -t <name>        Case name");
+        fmt::println("  -s <size>        Data size in KB/MB (e.g., 4K, 16K, 1M, default: 512MB)");
+        fmt::println("  -n <count>       Data number (default: 8)");
+        fmt::println("  -i <count>       Iteration count (default: 128)");
+        fmt::println("  -d <count>       Number of devices (default: 8)");
+    }
+    CaseArgs(int argc, char const* argv[])
+    {
+        for (auto i = 1; i < argc; i++) {
+            std::string arg{argv[i]};
+            if (arg == "-t" && i + 1 < argc) {
+                name = argv[++i];
+            } else if (arg == "-s" && i + 1 < argc) {
+                std::string sizeStr{argv[++i]};
+                char unit = sizeStr.back();
+                size_t multiplier = 1;
+                if (unit == 'K' || unit == 'k') {
+                    multiplier = 1024;
+                    sizeStr.pop_back();
+                } else if (unit == 'M' || unit == 'm') {
+                    multiplier = 1024 * 1024;
+                    sizeStr.pop_back();
+                } else {
+                    fmt::println("Invalid size unit. Use K for KB or M for MB.");
+                    exit(EXIT_FAILURE);
+                }
+                ioSize = std::stoull(sizeStr) * multiplier;
+            } else if (arg == "-n" && i + 1 < argc) {
+                ioNumber = std::stoull(argv[++i]);
+            } else if (arg == "-i" && i + 1 < argc) {
+                iterNumber = std::stoull(argv[++i]);
+            } else if (arg == "-d" && i + 1 < argc) {
+                deviceNumber = std::stoull(argv[++i]);
+            } else {
+                Help(argv[0]);
+                exit(EXIT_SUCCESS);
+            }
+        }
+    }
+};
+
+std::unordered_map<std::string, std::shared_ptr<CopyCase>> MakeAllCases()
+{
+    std::vector<std::shared_ptr<CopyCase>> array = {
+        std::make_shared<Host2DeviceCECase>(),       std::make_shared<Host2DeviceSMCase>(),
+        std::make_shared<OneHost2AllDeviceCECase>(), std::make_shared<AllHost2AllDeviceCECase>(),
+        std::make_shared<Device2DeviceCECase>(),     std::make_shared<OneDevice2AllDeviceCECase>(),
+    };
+    std::unordered_map<std::string, std::shared_ptr<CopyCase>> cases;
+    for (auto c : array) { cases[c->Key()] = c; }
+    return cases;
+}
 
 int main(int argc, char const* argv[])
 {
-    constexpr size_t nDevice = 8;
-    std::vector<std::shared_ptr<CopyCase>> cases = {
-        std::make_shared<Host2DeviceCECopyCase<4 KB, 2048, 1024>>("H2D4KIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<16 KB, 2048, 1024>>("H2D16KIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<32 KB, 2048, 512>>("H2D32KIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<64 KB, 2048, 256>>("H2D64KIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<128 KB, 2048, 128>>("H2D128KIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<1 MB, 1024, 32>>("H2D1MIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<8 MB, 512, 16>>("H2D8MIoCE", nDevice),
-        std::make_shared<Host2DeviceCECopyCase<512 MB, 8, 8>>("H2D512MIoCE", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<4 KB, 2048, 1024>>("H2D4KIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<16 KB, 2048, 1024>>("H2D16KIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<32 KB, 2048, 512>>("H2D32KIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<64 KB, 2048, 256>>("H2D64KIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<128 KB, 2048, 128>>("H2D128KIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<1 MB, 1024, 32>>("H2D1MIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<8 MB, 512, 16>>("H2D8MIoSM", nDevice),
-        std::make_shared<Host2DeviceSMCopyCase<512 MB, 8, 8>>("H2D512MIoSM", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<4 KB, 2048, 1024>>("H2D4KIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<16 KB, 2048, 1024>>("H2D16KIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<32 KB, 2048, 512>>("H2D32KIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<64 KB, 2048, 256>>("H2D64KIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<128 KB, 2048, 128>>("H2D128KIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<1 MB, 1024, 32>>("H2D1MIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<8 MB, 512, 16>>("H2D8MIoCE", nDevice),
-        std::make_shared<OneHost2AllDeviceCECopyCase<512 MB, 8, 8>>("H2D512MIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<4 KB, 2048, 1024>>("H2D4KIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<16 KB, 2048, 1024>>("H2D16KIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<32 KB, 2048, 512>>("H2D32KIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<64 KB, 2048, 256>>("H2D64KIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<128 KB, 2048, 128>>("H2D128KIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<1 MB, 1024, 32>>("H2D1MIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<8 MB, 512, 16>>("H2D8MIoCE", nDevice),
-        std::make_shared<AllHost2AllDeviceCECopyCase<512 MB, 8, 8>>("H2D512MIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<4 KB, 2048, 1024>>("D2D4KIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<16 KB, 2048, 1024>>("D2D16KIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<32 KB, 2048, 512>>("D2D32KIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<64 KB, 2048, 256>>("D2D64KIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<128 KB, 2048, 128>>("D2D128KIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<1 MB, 1024, 32>>("D2D1MIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<8 MB, 512, 16>>("D2D8MIoCE", nDevice),
-        std::make_shared<Device2DeviceCECopyCase<512 MB, 8, 8>>("D2D512MIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<4 KB, 2048, 1024>>("D2D4KIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<16 KB, 2048, 1024>>("D2D16KIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<32 KB, 2048, 512>>("D2D32KIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<64 KB, 2048, 256>>("D2D64KIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<128 KB, 2048, 128>>("D2D128KIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<1 MB, 1024, 32>>("D2D1MIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<8 MB, 512, 16>>("D2D8MIoCE", nDevice),
-        std::make_shared<OneDevice2AllDeviceCECopyCase<512 MB, 8, 8>>("D2D512MIoCE", nDevice),
-    };
-
-    for (auto test : cases) { test->Run(); }
+    CaseArgs args{argc, argv};
+    if (args.name.empty()) {
+        CaseArgs::Help(*argv);
+        return -1;
+    }
+    auto cases = MakeAllCases();
+    auto iter = cases.find(args.name);
+    if (iter == cases.end()) {
+        for (auto e : cases) { fmt::println("{:<32}: {}", e.first, e.second->Brief()); }
+        return -1;
+    }
+    iter->second->Run(args.ioSize, args.ioNumber, args.iterNumber, args.deviceNumber);
     return 0;
 }

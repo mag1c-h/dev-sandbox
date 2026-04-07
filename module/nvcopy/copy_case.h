@@ -28,167 +28,141 @@
 #include "copy_result.h"
 
 class CopyCase {
+    std::string key_;
+    std::string brief_;
+
 public:
+    CopyCase(std::string key, std::string brief) : key_{std::move(key)}, brief_{std::move(brief)} {}
     virtual ~CopyCase() = default;
-    virtual void Run() const = 0;
+    virtual void Run(size_t size, size_t num, size_t iter, size_t nDevice) const = 0;
+    const std::string& Key() const { return key_; }
+    const std::string& Brief() const { return brief_; }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class Host2DeviceCECopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class Host2DeviceCECase : public CopyCase {
 public:
-    explicit Host2DeviceCECopyCase(std::string name, size_t deviceNumber = 8, size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    Host2DeviceCECase()
+        : CopyCase{"host_to_device_ce", "memcpy from host to device with ce one by one"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, warmup_, Iter, false};
+        CopyInstance instance{&initiator, iter, false};
         CopyResult result;
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            CudaHostCopyBuffer srcBuffer{device, Size, Num};
-            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaHostCopyBuffer srcBuffer{device, size, num};
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
             result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
         }
-        result.Show("[[ " + name_ + " ]] - One to One");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class Host2DeviceSMCopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class Host2DeviceSMCase : public CopyCase {
 public:
-    explicit Host2DeviceSMCopyCase(std::string name, size_t deviceNumber = 8, size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    Host2DeviceSMCase()
+        : CopyCase{"host_to_device_sm", "memcpy from host to device with sm one by one"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CopyResult result;
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            CudaHostCopyBuffer srcBuffer{device, Size, Num};
-            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
-            CudaSMBatchCopyInitiator initiator(device, Num);
-            CopyInstance instance{&initiator, warmup_, Iter, false};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaHostCopyBuffer srcBuffer{device, size, num};
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
+            CudaSMBatchCopyInitiator initiator(device, num);
+            CopyInstance instance{&initiator, iter, false};
             result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
         }
-        result.Show("[[ " + name_ + " ]] - One to One");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class OneHost2AllDeviceCECopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class OneHost2AllDeviceCECase : public CopyCase {
 public:
-    explicit OneHost2AllDeviceCECopyCase(std::string name, size_t deviceNumber = 8,
-                                         size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    OneHost2AllDeviceCECase()
+        : CopyCase{"one_host_to_all_device_ce", "memcpy from one host to all device with ce"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, warmup_, Iter, false};
+        CopyInstance instance{&initiator, iter, false};
         CopyResult result;
-        CudaHostCopyBuffer srcBuffer{0, Size, Num};
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
+        CudaHostCopyBuffer srcBuffer{0, size, num};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
             result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
         }
-        result.Show("[[ " + name_ + " ]] - One to All");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class AllHost2AllDeviceCECopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class AllHost2AllDeviceCECase : public CopyCase {
 public:
-    explicit AllHost2AllDeviceCECopyCase(std::string name, size_t deviceNumber = 8,
-                                         size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    AllHost2AllDeviceCECase()
+        : CopyCase{"all_host_to_all_device_ce",
+                   "memcpy from all host to all device with ce at one time"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, warmup_, Iter, false};
-        std::vector<const CopyBuffer*> srcBuffers(deviceNumber_);
-        std::vector<const CopyBuffer*> dstBuffers(deviceNumber_);
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            srcBuffers[device] = new CudaHostCopyBuffer{device, Size, Num};
-            dstBuffers[device] = new CudaDeviceCopyBuffer{device, Size, Num};
+        CopyInstance instance{&initiator, iter, false};
+        std::vector<const CopyBuffer*> srcBuffers(nDevice);
+        std::vector<const CopyBuffer*> dstBuffers(nDevice);
+        for (size_t device = 0; device < nDevice; device++) {
+            srcBuffers[device] = new CudaHostCopyBuffer{device, size, num};
+            dstBuffers[device] = new CudaDeviceCopyBuffer{device, size, num};
         }
         CopyResult result;
         result.Push(instance.DoCopy(srcBuffers, dstBuffers));
-        for (size_t device = 0; device < deviceNumber_; device++) {
+        for (size_t device = 0; device < nDevice; device++) {
             delete srcBuffers[device];
             delete dstBuffers[device];
         }
-        result.Show("[[ " + name_ + " ]] - All to All");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class Device2DeviceCECopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class Device2DeviceCECase : public CopyCase {
 public:
-    explicit Device2DeviceCECopyCase(std::string name, size_t deviceNumber = 8, size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    Device2DeviceCECase()
+        : CopyCase{"device_to_device_ce", "memcpy from device to device with ce one by one"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CudaMemcpyDevice2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, warmup_, Iter, false};
+        CopyInstance instance{&initiator, iter, false};
         CopyResult result;
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            CudaDeviceCopyBuffer srcBuffer{device, Size, Num};
-            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaDeviceCopyBuffer srcBuffer{device, size, num};
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
             result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
         }
-        result.Show("[[ " + name_ + " ]] - One to One");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 
-template <size_t Size, size_t Num, size_t Iter>
-class OneDevice2AllDeviceCECopyCase : public CopyCase {
-    std::string name_;
-    size_t deviceNumber_;
-    size_t warmup_;
-
+class OneDevice2AllDeviceCECase : public CopyCase {
 public:
-    explicit OneDevice2AllDeviceCECopyCase(std::string name, size_t deviceNumber = 8,
-                                           size_t warmup = 3)
-        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    OneDevice2AllDeviceCECase()
+        : CopyCase{"one_device_to_all_device_ce", "memcpy from one device to all device with ce"}
     {
     }
-    void Run() const override
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
     {
         CudaMemcpyDevice2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, warmup_, Iter, false};
+        CopyInstance instance{&initiator, iter, false};
         CopyResult result;
-        CudaDeviceCopyBuffer srcBuffer{0, Size, Num};
-        for (size_t device = 0; device < deviceNumber_; device++) {
-            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
+        CudaDeviceCopyBuffer srcBuffer{0, size, num};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
             result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
         }
-        result.Show("[[ " + name_ + " ]] - One to All");
+        result.Show("[[ " + Key() + " ]] " + Brief());
     }
 };
 

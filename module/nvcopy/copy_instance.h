@@ -31,7 +31,6 @@
 
 class CopyInstance {
     CopyInitiator* initiator_;
-    size_t warmup_;
     size_t iterations_;
     bool affinitySrc_;
 
@@ -117,15 +116,16 @@ class CopyInstance {
     }
 
 public:
-    CopyInstance(CopyInitiator* initiator, size_t warmup, size_t iterations, bool affinitySrc)
-        : initiator_(initiator), warmup_(warmup), iterations_(iterations), affinitySrc_(affinitySrc)
+    CopyInstance(CopyInitiator* initiator, size_t iterations, bool affinitySrc)
+        : initiator_(initiator), iterations_(iterations), affinitySrc_(affinitySrc)
     {
     }
     CopyResult::Result DoCopy(const std::vector<const CopyBuffer*>& srcBuffers,
                               const std::vector<const CopyBuffer*>& dstBuffers)
     {
         auto contexts = Prepare(srcBuffers, dstBuffers);
-        for (size_t i = 0; i < warmup_; i++) { DoCopy(contexts); }
+        constexpr auto warmup = 3;
+        for (auto i = 0; i < warmup; i++) { DoCopy(contexts); }
         std::vector<size_t> submitCostArray;
         std::vector<size_t> copyCostArray;
         for (size_t i = 0; i < iterations_; i++) {
