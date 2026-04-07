@@ -30,7 +30,12 @@ class CopyInitiator {
 public:
     virtual ~CopyInitiator() = default;
     virtual std::string Name() const = 0;
-    virtual void Copy(void* src, void* dst, size_t size, cudaStream_t stream) = 0;
+    virtual void Copy(void* src, void* dst, size_t size, cudaStream_t stream) { ASSERT(false); }
+    virtual void Copy(void* const* src, void* const* dst, size_t size, size_t number,
+                      cudaStream_t stream)
+    {
+        for (size_t i = 0; i < number; i++) { Copy(src[i], dst[i], size, stream); }
+    }
 };
 
 class CudaMemcpyHost2DeviceCopyInitiator : public CopyInitiator {
@@ -39,15 +44,6 @@ public:
     void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
     {
         CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice, stream));
-    }
-};
-
-class CudaMemcpyDevice2HostCopyInitiator : public CopyInitiator {
-public:
-    std::string Name() const override { return "CE"; }
-    void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
-    {
-        CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToHost, stream));
     }
 };
 
