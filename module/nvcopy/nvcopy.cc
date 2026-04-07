@@ -80,9 +80,10 @@ struct CaseArgs {
 std::unordered_map<std::string, std::shared_ptr<CopyCase>> MakeAllCases()
 {
     std::vector<std::shared_ptr<CopyCase>> array = {
-        std::make_shared<Host2DeviceCECase>(),       std::make_shared<Host2DeviceSMCase>(),
-        std::make_shared<OneHost2AllDeviceCECase>(), std::make_shared<AllHost2AllDeviceCECase>(),
-        std::make_shared<Device2DeviceCECase>(),     std::make_shared<OneDevice2AllDeviceCECase>(),
+        std::make_shared<Host2DeviceCECase>(),         std::make_shared<Host2DeviceSMCase>(),
+        std::make_shared<OneHost2AllDeviceCECase>(),   std::make_shared<OneHost2AllDeviceSMCase>(),
+        std::make_shared<AllHost2AllDeviceCECase>(),   std::make_shared<Device2DeviceCECase>(),
+        std::make_shared<OneDevice2AllDeviceCECase>(),
     };
     std::unordered_map<std::string, std::shared_ptr<CopyCase>> cases;
     for (auto c : array) { cases[c->Key()] = c; }

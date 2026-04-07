@@ -99,6 +99,26 @@ public:
     }
 };
 
+class OneHost2AllDeviceSMCase : public CopyCase {
+public:
+    OneHost2AllDeviceSMCase()
+        : CopyCase{"one_host_to_all_device_sm", "memcpy from one host to all device with sm"}
+    {
+    }
+    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
+    {
+        CopyResult result;
+        CudaHostCopyBuffer srcBuffer{0, size, num};
+        for (size_t device = 0; device < nDevice; device++) {
+            CudaDeviceCopyBuffer dstBuffer{device, size, num};
+            CudaSMBatchCopyInitiator initiator{device, num};
+            CopyInstance instance{&initiator, iter, false};
+            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+        }
+        result.Show("[[ " + Key() + " ]] " + Brief());
+    }
+};
+
 class AllHost2AllDeviceCECase : public CopyCase {
 public:
     AllHost2AllDeviceCECase()
