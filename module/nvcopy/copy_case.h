@@ -59,6 +59,31 @@ public:
 };
 
 template <size_t Size, size_t Num, size_t Iter>
+class Host2DeviceSMCopyCase : public CopyCase {
+    std::string name_;
+    size_t deviceNumber_;
+    size_t warmup_;
+
+public:
+    explicit Host2DeviceSMCopyCase(std::string name, size_t deviceNumber = 8, size_t warmup = 3)
+        : CopyCase{}, name_{std::move(name)}, deviceNumber_{deviceNumber}, warmup_{warmup}
+    {
+    }
+    void Run() const override
+    {
+        CopyResult result;
+        for (size_t device = 0; device < deviceNumber_; device++) {
+            CudaHostCopyBuffer srcBuffer{device, Size, Num};
+            CudaDeviceCopyBuffer dstBuffer{device, Size, Num};
+            CudaSMBatchCopyInitiator initiator(device, Num);
+            CopyInstance instance{&initiator, warmup_, Iter, false};
+            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+        }
+        result.Show("[[ " + name_ + " ]] - One to One");
+    }
+};
+
+template <size_t Size, size_t Num, size_t Iter>
 class OneHost2AllDeviceCECopyCase : public CopyCase {
     std::string name_;
     size_t deviceNumber_;

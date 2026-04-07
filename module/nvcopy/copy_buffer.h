@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include "error_handle.h"
 
@@ -56,7 +57,9 @@ class CudaHostCopyBuffer : public CopyBuffer {
 public:
     CudaHostCopyBuffer(size_t device, size_t size, size_t number) : CopyBuffer{device, size, number}
     {
-        CUDA_ASSERT(cudaMallocHost(&addr_, size_ * number_));
+        const auto totalSize = size_ * number_;
+        CUDA_ASSERT(cudaMallocHost(&addr_, totalSize));
+        std::memset(addr_, 'h', totalSize);
     }
     ~CudaHostCopyBuffer() override
     {
@@ -71,7 +74,9 @@ public:
         : CopyBuffer{device, size, number}
     {
         CUDA_ASSERT(cudaSetDevice(device_));
-        CUDA_ASSERT(cudaMalloc(&addr_, size_ * number_));
+        const auto totalSize = size_ * number_;
+        CUDA_ASSERT(cudaMalloc(&addr_, totalSize));
+        CUDA_ASSERT(cudaMemset(addr_, 'd', totalSize));
     }
     ~CudaDeviceCopyBuffer() override
     {

@@ -67,8 +67,8 @@ class CopyInstance {
             ctx.src.reserve(src.Number());
             ctx.dst.reserve(dst.Number());
             for (size_t j = 0; j < src.Number(); j++) {
-                ctx.src.push_back(src[i]);
-                ctx.dst.push_back(dst[i]);
+                ctx.src.push_back(src[j]);
+                ctx.dst.push_back(dst[j]);
             }
         }
         return contexts;

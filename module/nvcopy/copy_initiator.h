@@ -24,6 +24,7 @@
 #ifndef COPY_INITIATOR_H
 #define COPY_INITIATOR_H
 
+#include "copy_kernel.h"
 #include "error_handle.h"
 
 class CopyInitiator {
@@ -53,6 +54,32 @@ public:
     void Copy(void* src, void* dst, size_t size, cudaStream_t stream) override
     {
         CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream));
+    }
+};
+
+class CudaSMBatchCopyInitiator : public CopyInitiator {
+protected:
+    size_t number_;
+    void* dSrc_;
+    void* dDst_;
+
+public:
+    CudaSMBatchCopyInitiator(size_t device, size_t number) : CopyInitiator{}, number_{number}
+    {
+        const auto ptrSize = sizeof(void*) * number;
+        CUDA_ASSERT(cudaSetDevice(device));
+        CUDA_ASSERT(cudaMalloc(&dSrc_, ptrSize));
+        CUDA_ASSERT(cudaMalloc(&dDst_, ptrSize));
+    }
+    std::string Name() const override { return "SM"; }
+    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
+              cudaStream_t stream) override
+    {
+        ASSERT(number <= number_);
+        const auto ptrSize = sizeof(void*) * number;
+        CUDA_ASSERT(cudaMemcpyAsync(dSrc_, (void*)src, ptrSize, cudaMemcpyHostToDevice, stream));
+        CUDA_ASSERT(cudaMemcpyAsync(dDst_, (void*)dst, ptrSize, cudaMemcpyHostToDevice, stream));
+        CUDA_ASSERT(CudaSMCopyBatchAsync((void**)dSrc_, (void**)dDst_, size, number, stream));
     }
 };
 
