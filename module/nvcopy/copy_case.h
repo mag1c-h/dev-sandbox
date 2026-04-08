@@ -24,6 +24,7 @@
 #ifndef COPY_CASE_H
 #define COPY_CASE_H
 
+#include <memory>
 #include "copy_instance.h"
 #include "copy_result.h"
 
@@ -39,151 +40,18 @@ public:
     const std::string& Brief() const { return brief_; }
 };
 
-class Host2DeviceCECase : public CopyCase {
-public:
-    Host2DeviceCECase()
-        : CopyCase{"host_to_device_ce", "memcpy from host to device with ce one by one"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, iter, false};
-        CopyResult result;
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaHostCopyBuffer srcBuffer{device, size, num};
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
+class CopyCaseFactory {
+    CopyCaseFactory() = default;
+    std::vector<std::shared_ptr<CopyCase>> cases_;
 
-class Host2DeviceSMCase : public CopyCase {
 public:
-    Host2DeviceSMCase()
-        : CopyCase{"host_to_device_sm", "memcpy from host to device with sm one by one"}
+    static CopyCaseFactory& Factory()
     {
+        static CopyCaseFactory factory;
+        return factory;
     }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CopyResult result;
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaHostCopyBuffer srcBuffer{device, size, num};
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            CudaSMBatchCopyInitiator initiator(device, num);
-            CopyInstance instance{&initiator, iter, false};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
-
-class OneHost2AllDeviceCECase : public CopyCase {
-public:
-    OneHost2AllDeviceCECase()
-        : CopyCase{"one_host_to_all_device_ce", "memcpy from one host to all device with ce"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, iter, false};
-        CopyResult result;
-        CudaHostCopyBuffer srcBuffer{0, size, num};
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
-
-class OneHost2AllDeviceSMCase : public CopyCase {
-public:
-    OneHost2AllDeviceSMCase()
-        : CopyCase{"one_host_to_all_device_sm", "memcpy from one host to all device with sm"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CopyResult result;
-        CudaHostCopyBuffer srcBuffer{0, size, num};
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            CudaSMBatchCopyInitiator initiator{device, num};
-            CopyInstance instance{&initiator, iter, false};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
-
-class AllHost2AllDeviceCECase : public CopyCase {
-public:
-    AllHost2AllDeviceCECase()
-        : CopyCase{"all_host_to_all_device_ce",
-                   "memcpy from all host to all device with ce at one time"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CudaMemcpyHost2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, iter, false};
-        std::vector<const CopyBuffer*> srcBuffers(nDevice);
-        std::vector<const CopyBuffer*> dstBuffers(nDevice);
-        for (size_t device = 0; device < nDevice; device++) {
-            srcBuffers[device] = new CudaHostCopyBuffer{device, size, num};
-            dstBuffers[device] = new CudaDeviceCopyBuffer{device, size, num};
-        }
-        CopyResult result;
-        result.Push(instance.DoCopy(srcBuffers, dstBuffers));
-        for (size_t device = 0; device < nDevice; device++) {
-            delete srcBuffers[device];
-            delete dstBuffers[device];
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
-
-class Device2DeviceCECase : public CopyCase {
-public:
-    Device2DeviceCECase()
-        : CopyCase{"device_to_device_ce", "memcpy from device to device with ce one by one"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CudaMemcpyDevice2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, iter, false};
-        CopyResult result;
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaDeviceCopyBuffer srcBuffer{device, size, num};
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
-};
-
-class OneDevice2AllDeviceCECase : public CopyCase {
-public:
-    OneDevice2AllDeviceCECase()
-        : CopyCase{"one_device_to_all_device_ce", "memcpy from one device to all device with ce"}
-    {
-    }
-    void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override
-    {
-        CudaMemcpyDevice2DeviceCopyInitiator initiator;
-        CopyInstance instance{&initiator, iter, false};
-        CopyResult result;
-        CudaDeviceCopyBuffer srcBuffer{0, size, num};
-        for (size_t device = 0; device < nDevice; device++) {
-            CudaDeviceCopyBuffer dstBuffer{device, size, num};
-            result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-        }
-        result.Show("[[ " + Key() + " ]] " + Brief());
-    }
+    void Register(std::shared_ptr<CopyCase> c) { cases_.push_back(std::move(c)); }
+    const std::vector<std::shared_ptr<CopyCase>>& AllCases() const { return cases_; }
 };
 
 #endif

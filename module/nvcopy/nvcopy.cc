@@ -22,7 +22,6 @@
  * SOFTWARE.
  * */
 #include <charconv>
-#include <memory>
 #include <string_view>
 #include <unordered_set>
 #include "copy_case.h"
@@ -98,16 +97,6 @@ struct CaseArgs {
     }
 };
 
-static std::vector<std::shared_ptr<CopyCase>> MakeAllCases()
-{
-    return {
-        std::make_shared<Host2DeviceCECase>(),         std::make_shared<Host2DeviceSMCase>(),
-        std::make_shared<OneHost2AllDeviceCECase>(),   std::make_shared<OneHost2AllDeviceSMCase>(),
-        std::make_shared<AllHost2AllDeviceCECase>(),   std::make_shared<Device2DeviceCECase>(),
-        std::make_shared<OneDevice2AllDeviceCECase>(),
-    };
-}
-
 static std::vector<std::shared_ptr<CopyCase>> FilterCases(
     const std::unordered_set<std::string>& names,
     const std::vector<std::shared_ptr<CopyCase>>& allCases)
@@ -126,7 +115,7 @@ int main(int argc, char const* argv[])
         CaseArgs::Help(argv[0]);
         return -1;
     }
-    const auto cases = MakeAllCases();
+    const auto cases = CopyCaseFactory::Factory().AllCases();
     const auto filtered = FilterCases(args.names, cases);
     if (filtered.empty()) {
         for (const auto& c : cases) { fmt::println("{:<32}: {}", c->Key(), c->Brief()); }
