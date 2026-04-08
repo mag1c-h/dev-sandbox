@@ -33,9 +33,15 @@ class CopyCase {
     std::string brief_;
 
 public:
+    struct Context {
+        size_t size;
+        size_t num;
+        size_t iter;
+        size_t nDevice;
+    };
     CopyCase(std::string key, std::string brief) : key_{std::move(key)}, brief_{std::move(brief)} {}
     virtual ~CopyCase() = default;
-    virtual void Run(size_t size, size_t num, size_t iter, size_t nDevice) const = 0;
+    virtual void Run(const Context& ctx) const = 0;
     const std::string& Key() const { return key_; }
     const std::string& Brief() const { return brief_; }
 };

@@ -121,8 +121,7 @@ int main(int argc, char const* argv[])
         for (const auto& c : cases) { fmt::println("{:<32}: {}", c->Key(), c->Brief()); }
         return -1;
     }
-    for (const auto& c : filtered) {
-        c->Run(args.ioSize, args.ioNumber, args.iterNumber, args.deviceNumber);
-    }
+    CopyCase::Context ctx{args.ioSize, args.ioNumber, args.iterNumber, args.deviceNumber};
+    for (const auto& c : filtered) { c->Run(ctx); }
     return 0;
 }

@@ -29,85 +29,85 @@ public:
     Registrar() { CopyCaseFactory::Factory().Register(std::make_shared<T>()); }
 };
 
-#define DEFINE_COPY_CASE(ClassName, Key, Brief)                                        \
-    class ClassName : public CopyCase {                                                \
-    public:                                                                            \
-        ClassName() : CopyCase(Key, Brief) {}                                          \
-        void Run(size_t size, size_t num, size_t iter, size_t nDevice) const override; \
-    };                                                                                 \
-    static Registrar<ClassName> global_##ClassName##_registrar;                        \
-    void ClassName::Run(size_t size, size_t num, size_t iter, size_t nDevice) const
+#define DEFINE_COPY_CASE(ClassName, Key, Brief, Ctx)            \
+    class ClassName : public CopyCase {                         \
+    public:                                                     \
+        ClassName() : CopyCase(Key, Brief) {}                   \
+        void Run(const Context&) const override;                \
+    };                                                          \
+    static Registrar<ClassName> global_##ClassName##_registrar; \
+    void ClassName::Run(const Context& Ctx) const
 
 DEFINE_COPY_CASE(Host2DeviceCECase, "host_to_device_ce",
-                 "memcpy from host to device with ce one by one")
+                 "memcpy from host to device with ce one by one", ctx)
 {
     CudaMemcpyHost2DeviceCopyInitiator initiator;
-    CopyInstance instance{&initiator, iter, false};
+    CopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaHostCopyBuffer srcBuffer{device, size, num};
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaHostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
 DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
-                 "memcpy from host to device with sm one by one")
+                 "memcpy from host to device with sm one by one", ctx)
 {
     CopyResult result;
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaHostCopyBuffer srcBuffer{device, size, num};
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
-        CudaSMBatchCopyInitiator initiator(device, num);
-        CopyInstance instance{&initiator, iter, false};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaHostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        CudaSMBatchCopyInitiator initiator(device, ctx.num);
+        CopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
 DEFINE_COPY_CASE(OneHost2AllDeviceCECase, "one_host_to_all_device_ce",
-                 "memcpy from one host to all device with ce")
+                 "memcpy from one host to all device with ce", ctx)
 {
     CudaMemcpyHost2DeviceCopyInitiator initiator;
-    CopyInstance instance{&initiator, iter, false};
+    CopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    CudaHostCopyBuffer srcBuffer{0, size, num};
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
+    CudaHostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
 DEFINE_COPY_CASE(OneHost2AllDeviceSMCase, "one_host_to_all_device_sm",
-                 "memcpy from one host to all device with sm")
+                 "memcpy from one host to all device with sm", ctx)
 {
     CopyResult result;
-    CudaHostCopyBuffer srcBuffer{0, size, num};
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
-        CudaSMBatchCopyInitiator initiator{device, num};
-        CopyInstance instance{&initiator, iter, false};
+    CudaHostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        CudaSMBatchCopyInitiator initiator{device, ctx.num};
+        CopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
 DEFINE_COPY_CASE(AllHost2AllDeviceCECase, "all_host_to_all_device_ce",
-                 "memcpy from all host to all device with ce at one time")
+                 "memcpy from all host to all device with ce at one time", ctx)
 {
     CudaMemcpyHost2DeviceCopyInitiator initiator;
-    CopyInstance instance{&initiator, iter, false};
-    std::vector<const CopyBuffer*> srcBuffers(nDevice);
-    std::vector<const CopyBuffer*> dstBuffers(nDevice);
-    for (size_t device = 0; device < nDevice; device++) {
-        srcBuffers[device] = new CudaHostCopyBuffer{device, size, num};
-        dstBuffers[device] = new CudaDeviceCopyBuffer{device, size, num};
+    CopyInstance instance{&initiator, ctx.iter, false};
+    std::vector<const CopyBuffer*> srcBuffers(ctx.nDevice);
+    std::vector<const CopyBuffer*> dstBuffers(ctx.nDevice);
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        srcBuffers[device] = new CudaHostCopyBuffer{device, ctx.size, ctx.num};
+        dstBuffers[device] = new CudaDeviceCopyBuffer{device, ctx.size, ctx.num};
     }
     CopyResult result;
     result.Push(instance.DoCopy(srcBuffers, dstBuffers));
-    for (size_t device = 0; device < nDevice; device++) {
+    for (size_t device = 0; device < ctx.nDevice; device++) {
         delete srcBuffers[device];
         delete dstBuffers[device];
     }
@@ -115,28 +115,28 @@ DEFINE_COPY_CASE(AllHost2AllDeviceCECase, "all_host_to_all_device_ce",
 }
 
 DEFINE_COPY_CASE(Device2DeviceCECase, "device_to_device_ce",
-                 "memcpy from device to device with ce one by one")
+                 "memcpy from device to device with ce one by one", ctx)
 {
     CudaMemcpyDevice2DeviceCopyInitiator initiator;
-    CopyInstance instance{&initiator, iter, false};
+    CopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaDeviceCopyBuffer srcBuffer{device, size, num};
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaDeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
 DEFINE_COPY_CASE(OneDevice2AllDeviceCECase, "one_device_to_all_device_ce",
-                 "memcpy from one device to all device with ce")
+                 "memcpy from one device to all device with ce", ctx)
 {
     CudaMemcpyDevice2DeviceCopyInitiator initiator;
-    CopyInstance instance{&initiator, iter, false};
+    CopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    CudaDeviceCopyBuffer srcBuffer{0, size, num};
-    for (size_t device = 0; device < nDevice; device++) {
-        CudaDeviceCopyBuffer dstBuffer{device, size, num};
+    CudaDeviceCopyBuffer srcBuffer{0, ctx.size, ctx.num};
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        CudaDeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
