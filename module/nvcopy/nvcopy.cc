@@ -21,18 +21,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
+#include <charconv>
 #include <memory>
-#include <unordered_map>
+#include <string_view>
+#include <unordered_set>
 #include "copy_case.h"
 
 struct CaseArgs {
-    std::string name;
-    size_t ioSize{512 * 1024 * 1024};
-    size_t ioNumber{8};
-    size_t iterNumber{128};
-    size_t deviceNumber{8};
+    std::unordered_set<std::string> names;
+    std::size_t ioSize{512ull * 1024ull * 1024ull};
+    std::size_t ioNumber{8};
+    std::size_t iterNumber{128};
+    std::size_t deviceNumber{8};
 
-    static void Help(const char* proc)
+    static void Help(std::string_view proc)
     {
         fmt::println("Usage: {} [options]", proc);
         fmt::println("Options:");
@@ -42,67 +44,96 @@ struct CaseArgs {
         fmt::println("  -i <count>       Iteration count (default: 128)");
         fmt::println("  -d <count>       Number of devices (default: 8)");
     }
+
+    static std::size_t ParseUnsigned(std::string_view text, std::string_view errorMessage)
+    {
+        std::size_t value = 0;
+        const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (ec != std::errc() || ptr != text.data() + text.size()) {
+            fmt::println("{}", errorMessage);
+            std::exit(EXIT_FAILURE);
+        }
+        return value;
+    }
+
+    static std::size_t ParseSize(std::string_view sizeStr)
+    {
+        if (sizeStr.empty()) {
+            fmt::println("Invalid size unit. Use K for KB or M for MB.");
+            std::exit(EXIT_FAILURE);
+        }
+        const auto unit = sizeStr.back();
+        sizeStr.remove_suffix(1);
+        const auto value = ParseUnsigned(sizeStr, "Invalid size value.");
+        switch (unit) {
+            case 'K':
+            case 'k': return value * 1024ull;
+            case 'M':
+            case 'm': return value * 1024ull * 1024ull;
+            default:
+                fmt::println("Invalid size unit. Use K for KB or M for MB.");
+                std::exit(EXIT_FAILURE);
+        }
+    }
+
     CaseArgs(int argc, char const* argv[])
     {
-        for (auto i = 1; i < argc; i++) {
-            std::string arg{argv[i]};
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view arg{argv[i]};
             if (arg == "-t" && i + 1 < argc) {
-                name = argv[++i];
+                names.emplace(argv[++i]);
             } else if (arg == "-s" && i + 1 < argc) {
-                std::string sizeStr{argv[++i]};
-                char unit = sizeStr.back();
-                size_t multiplier = 1;
-                if (unit == 'K' || unit == 'k') {
-                    multiplier = 1024;
-                    sizeStr.pop_back();
-                } else if (unit == 'M' || unit == 'm') {
-                    multiplier = 1024 * 1024;
-                    sizeStr.pop_back();
-                } else {
-                    fmt::println("Invalid size unit. Use K for KB or M for MB.");
-                    exit(EXIT_FAILURE);
-                }
-                ioSize = std::stoull(sizeStr) * multiplier;
+                ioSize = ParseSize(argv[++i]);
             } else if (arg == "-n" && i + 1 < argc) {
-                ioNumber = std::stoull(argv[++i]);
+                ioNumber = ParseUnsigned(argv[++i], "Invalid data count.");
             } else if (arg == "-i" && i + 1 < argc) {
-                iterNumber = std::stoull(argv[++i]);
+                iterNumber = ParseUnsigned(argv[++i], "Invalid iteration count.");
             } else if (arg == "-d" && i + 1 < argc) {
-                deviceNumber = std::stoull(argv[++i]);
+                deviceNumber = ParseUnsigned(argv[++i], "Invalid device count.");
             } else {
                 Help(argv[0]);
-                exit(EXIT_SUCCESS);
+                std::exit(EXIT_SUCCESS);
             }
         }
     }
 };
 
-std::unordered_map<std::string, std::shared_ptr<CopyCase>> MakeAllCases()
+static std::vector<std::shared_ptr<CopyCase>> MakeAllCases()
 {
-    std::vector<std::shared_ptr<CopyCase>> array = {
+    return {
         std::make_shared<Host2DeviceCECase>(),         std::make_shared<Host2DeviceSMCase>(),
         std::make_shared<OneHost2AllDeviceCECase>(),   std::make_shared<OneHost2AllDeviceSMCase>(),
         std::make_shared<AllHost2AllDeviceCECase>(),   std::make_shared<Device2DeviceCECase>(),
         std::make_shared<OneDevice2AllDeviceCECase>(),
     };
-    std::unordered_map<std::string, std::shared_ptr<CopyCase>> cases;
-    for (auto c : array) { cases[c->Key()] = c; }
+}
+
+static std::vector<std::shared_ptr<CopyCase>> FilterCases(
+    const std::unordered_set<std::string>& names,
+    const std::vector<std::shared_ptr<CopyCase>>& allCases)
+{
+    std::vector<std::shared_ptr<CopyCase>> cases;
+    cases.reserve(allCases.size());
+    std::copy_if(allCases.begin(), allCases.end(), std::back_inserter(cases),
+                 [&names](const auto& c) { return names.find(c->Key()) != names.end(); });
     return cases;
 }
 
 int main(int argc, char const* argv[])
 {
-    CaseArgs args{argc, argv};
-    if (args.name.empty()) {
-        CaseArgs::Help(*argv);
+    const CaseArgs args{argc, argv};
+    if (args.names.empty()) {
+        CaseArgs::Help(argv[0]);
         return -1;
     }
-    auto cases = MakeAllCases();
-    auto iter = cases.find(args.name);
-    if (iter == cases.end()) {
-        for (auto e : cases) { fmt::println("{:<32}: {}", e.first, e.second->Brief()); }
+    const auto cases = MakeAllCases();
+    const auto filtered = FilterCases(args.names, cases);
+    if (filtered.empty()) {
+        for (const auto& c : cases) { fmt::println("{:<32}: {}", c->Key(), c->Brief()); }
         return -1;
     }
-    iter->second->Run(args.ioSize, args.ioNumber, args.iterNumber, args.deviceNumber);
+    for (const auto& c : filtered) {
+        c->Run(args.ioSize, args.ioNumber, args.iterNumber, args.deviceNumber);
+    }
     return 0;
 }
