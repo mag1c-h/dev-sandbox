@@ -26,6 +26,7 @@
 #include <fmt/format.h>
 #include <unordered_set>
 #include "copy_case.h"
+#include "copy_runtime.h"
 
 struct ArgsParser {
     std::unordered_set<std::string> names;
@@ -99,6 +100,7 @@ int main(int argc, char const* argv[])
         ArgsParser::Help(argv[0]);
         return -1;
     }
+    CopyRuntime runtime;
     const auto cases = CopyCaseFactory::Instance().AllCases();
     std::vector<std::shared_ptr<CopyCase>> filtered;
     std::copy_if(cases.begin(), cases.end(), std::back_inserter(filtered),
