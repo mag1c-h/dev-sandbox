@@ -60,7 +60,7 @@ DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
     for (size_t device = 0; device < ctx.nDevice; device++) {
         CopyBufferHost srcBuffer{device, ctx.size, ctx.num};
         CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
-        H2DBatchCopyInitiator initiator(device, ctx.num);
+        SMCopyInitiator initiator(device, ctx.num);
         CopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
@@ -88,7 +88,7 @@ DEFINE_COPY_CASE(OneHost2AllDeviceSMCase, "one_host_to_all_device_sm",
     CopyBufferHost srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
         CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
-        H2DBatchCopyInitiator initiator{device, ctx.num};
+        SMCopyInitiator initiator{device, ctx.num};
         CopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }

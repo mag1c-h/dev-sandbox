@@ -60,26 +60,13 @@ public:
               void* args) const override;
 };
 
-class H2DBatchCopyInitiator : public CopyInitiator {
+class SMCopyInitiator : public CopyInitiator {
     void* dSrc_{nullptr};
     void* dDst_{nullptr};
 
 public:
-    H2DBatchCopyInitiator(size_t device, size_t number);
-    ~H2DBatchCopyInitiator() override;
-    std::string Name() const override;
-    void Copy(void* src, void* dst, size_t size, void* args) const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
-class D2HBatchCopyInitiator : public CopyInitiator {
-    void* dSrc_{nullptr};
-    void* dDst_{nullptr};
-
-public:
-    D2HBatchCopyInitiator(size_t device, size_t number);
-    ~D2HBatchCopyInitiator() override;
+    SMCopyInitiator(size_t device, size_t number);
+    ~SMCopyInitiator() override;
     std::string Name() const override;
     void Copy(void* src, void* dst, size_t size, void* args) const override;
     void Copy(void* const* src, void* const* dst, size_t size, size_t number,

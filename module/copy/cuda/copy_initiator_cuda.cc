@@ -21,61 +21,82 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#include <cstring>
 #include "copy_initiator.h"
+#include "error_handle_cuda.h"
 
-std::string H2DCopyInitiator::Name() const { return "memcpy"; }
+extern cudaError_t CudaSMCopyBatchAsync(void* src[], void* dst[], size_t size, size_t number,
+                                        cudaStream_t stream);
+
+std::string H2DCopyInitiator::Name() const { return "CE"; }
 
 void H2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
 {
-    std::memcpy(dst, src, size);
+    auto stream = static_cast<cudaStream_t>(args);
+    CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice, stream));
 }
 
 void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
 }
 
-std::string D2HCopyInitiator::Name() const { return "memcpy"; }
+std::string D2HCopyInitiator::Name() const { return "CE"; }
 
 void D2HCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
 {
-    std::memcpy(dst, src, size);
+    auto stream = static_cast<cudaStream_t>(args);
+    CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToHost, stream));
 }
 
 void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
 }
 
-std::string D2DCopyInitiator::Name() const { return "memcpy"; }
+std::string D2DCopyInitiator::Name() const { return "CE"; }
 
 void D2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
 {
-    std::memcpy(dst, src, size);
+    auto stream = static_cast<cudaStream_t>(args);
+    CUDA_ASSERT(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream));
 }
 
 void D2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
 }
 
-SMCopyInitiator::SMCopyInitiator(size_t device, size_t number) {}
+SMCopyInitiator::SMCopyInitiator(size_t device, size_t number)
+{
+    const auto ptrSize = sizeof(void*) * number;
+    CUDA_ASSERT(cudaSetDevice(device));
+    CUDA_ASSERT(cudaMalloc(&dSrc_, ptrSize));
+    CUDA_ASSERT(cudaMalloc(&dDst_, ptrSize));
+}
 
-SMCopyInitiator::~SMCopyInitiator() {}
+SMCopyInitiator::~SMCopyInitiator()
+{
+    if (dSrc_) { CUDA_ASSERT(cudaFree(dSrc_)); }
+    if (dDst_) { CUDA_ASSERT(cudaFree(dDst_)); }
+}
 
-std::string SMCopyInitiator::Name() const { return "memcpy"; }
+std::string SMCopyInitiator::Name() const { return "SM"; }
 
 void SMCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
 {
-    std::memcpy(dst, src, size);
+    ASSERT(false && "This method should not be called");
 }
 
 void SMCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                            void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+    auto stream = static_cast<cudaStream_t>(args);
+    const auto ptrSize = sizeof(void*) * number;
+    CUDA_ASSERT(cudaMemcpyAsync(dSrc_, src, ptrSize, cudaMemcpyHostToDevice, stream));
+    CUDA_ASSERT(cudaMemcpyAsync(dDst_, dst, ptrSize, cudaMemcpyHostToDevice, stream));
+    CUDA_ASSERT(CudaSMCopyBatchAsync(static_cast<void**>(dSrc_), static_cast<void**>(dDst_), size,
+                                     number, stream));
 }
