@@ -26,11 +26,6 @@
 
 std::string H2DCopyInitiator::Name() const { return "memcpy"; }
 
-void H2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    std::memcpy(dst, src, size);
-}
-
 void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
@@ -39,11 +34,6 @@ void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, siz
 
 std::string D2HCopyInitiator::Name() const { return "memcpy"; }
 
-void D2HCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    std::memcpy(dst, src, size);
-}
-
 void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
@@ -51,11 +41,6 @@ void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, siz
 }
 
 std::string D2DCopyInitiator::Name() const { return "memcpy"; }
-
-void D2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    std::memcpy(dst, src, size);
-}
 
 void D2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
@@ -68,11 +53,6 @@ SMCopyInitiator::SMCopyInitiator(size_t device, size_t number) {}
 SMCopyInitiator::~SMCopyInitiator() {}
 
 std::string SMCopyInitiator::Name() const { return "memcpy"; }
-
-void SMCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    std::memcpy(dst, src, size);
-}
 
 void SMCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                            void* args) const

@@ -26,44 +26,38 @@
 
 std::string H2DCopyInitiator::Name() const { return "CE"; }
 
-void H2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    auto stream = static_cast<aclrtStream>(args);
-    ASCEND_ASSERT(aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_HOST_TO_DEVICE, stream));
-}
-
 void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
+    auto stream = static_cast<aclrtStream>(args);
+    for (size_t i = 0; i < number; ++i) {
+        ASCEND_ASSERT(
+            aclrtMemcpyAsync(dst[i], size, src[i], size, ACL_MEMCPY_HOST_TO_DEVICE, stream));
+    }
 }
 
 std::string D2HCopyInitiator::Name() const { return "CE"; }
 
-void D2HCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    auto stream = static_cast<aclrtStream>(args);
-    ASCEND_ASSERT(aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_DEVICE_TO_HOST, stream));
-}
-
 void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
+    auto stream = static_cast<aclrtStream>(args);
+    for (size_t i = 0; i < number; ++i) {
+        ASCEND_ASSERT(
+            aclrtMemcpyAsync(dst[i], size, src[i], size, ACL_MEMCPY_DEVICE_TO_HOST, stream));
+    }
 }
 
 std::string D2DCopyInitiator::Name() const { return "CE"; }
 
-void D2DCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    auto stream = static_cast<aclrtStream>(args);
-    ASCEND_ASSERT(aclrtMemcpyAsync(dst, size, src, size, ACL_MEMCPY_DEVICE_TO_DEVICE, stream));
-}
-
 void D2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                             void* args) const
 {
-    for (size_t i = 0; i < number; ++i) { Copy(src[i], dst[i], size, args); }
+    auto stream = static_cast<aclrtStream>(args);
+    for (size_t i = 0; i < number; ++i) {
+        ASCEND_ASSERT(
+            aclrtMemcpyAsync(dst[i], size, src[i], size, ACL_MEMCPY_DEVICE_TO_DEVICE, stream));
+    }
 }
 
 SMCopyInitiator::SMCopyInitiator(size_t device, size_t number)
@@ -81,11 +75,6 @@ SMCopyInitiator::~SMCopyInitiator()
 }
 
 std::string SMCopyInitiator::Name() const { return "SM"; }
-
-void SMCopyInitiator::Copy(void* src, void* dst, size_t size, void* args) const
-{
-    ASSERT(false && "This method should not be called");
-}
 
 void SMCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
                            void* args) const

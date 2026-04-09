@@ -31,7 +31,6 @@ class CopyInitiator {
 public:
     virtual ~CopyInitiator() = default;
     virtual std::string Name() const = 0;
-    virtual void Copy(void* src, void* dst, size_t size, void* args) const = 0;
     virtual void Copy(void* const* src, void* const* dst, size_t size, size_t number,
                       void* args) const = 0;
 };
@@ -39,7 +38,6 @@ public:
 class H2DCopyInitiator : public CopyInitiator {
 public:
     std::string Name() const override;
-    void Copy(void* src, void* dst, size_t size, void* args) const override;
     void Copy(void* const* src, void* const* dst, size_t size, size_t number,
               void* args) const override;
 };
@@ -47,7 +45,6 @@ public:
 class D2HCopyInitiator : public CopyInitiator {
 public:
     std::string Name() const override;
-    void Copy(void* src, void* dst, size_t size, void* args) const override;
     void Copy(void* const* src, void* const* dst, size_t size, size_t number,
               void* args) const override;
 };
@@ -55,7 +52,6 @@ public:
 class D2DCopyInitiator : public CopyInitiator {
 public:
     std::string Name() const override;
-    void Copy(void* src, void* dst, size_t size, void* args) const override;
     void Copy(void* const* src, void* const* dst, size_t size, size_t number,
               void* args) const override;
 };
@@ -68,7 +64,6 @@ public:
     SMCopyInitiator(size_t device, size_t number);
     ~SMCopyInitiator() override;
     std::string Name() const override;
-    void Copy(void* src, void* dst, size_t size, void* args) const override;
     void Copy(void* const* src, void* const* dst, size_t size, size_t number,
               void* args) const override;
 };
