@@ -21,6 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
+#include <cstring>
+#include <vector>
 #include "copy_initiator.h"
 #include "error_handle_ascend.h"
 
@@ -34,6 +36,26 @@ void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, siz
         ASCEND_ASSERT(
             aclrtMemcpyAsync(dst[i], size, src[i], size, ACL_MEMCPY_HOST_TO_DEVICE, stream));
     }
+}
+
+std::string H2DBatchCopyInitiator::Name() const { return "BatchCE"; }
+
+void H2DBatchCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
+                                 void* args) const
+{
+    auto stream = static_cast<aclrtStream>(args);
+    aclrtMemcpyBatchAttr attr;
+    std::memset(&attr, 0, sizeof(attr));
+    attr.srcLoc.type = ACL_MEM_LOCATION_TYPE_HOST;
+    attr.dstLoc.type = ACL_MEM_LOCATION_TYPE_DEVICE;
+    attr.dstLoc.id = device_;
+    std::vector<aclrtMemcpyBatchAttr> attrArray{attr};
+    std::vector<size_t> attrIdxArray(number, 0);
+    std::vector<size_t> sizeArray(number, size);
+    size_t failureIdx = 0;
+    ASCEND_ASSERT(aclrtMemcpyBatchAsync(
+        const_cast<void**>(dst), sizeArray.data(), const_cast<void**>(src), sizeArray.data(),
+        number, attrArray.data(), attrIdxArray.data(), attrArray.size(), &failureIdx, stream));
 }
 
 std::string D2HCopyInitiator::Name() const { return "CE"; }

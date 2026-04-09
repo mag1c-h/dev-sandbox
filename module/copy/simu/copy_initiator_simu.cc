@@ -32,6 +32,14 @@ void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, siz
     for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
 }
 
+std::string H2DBatchCopyInitiator::Name() const { return "memcpy"; }
+
+void H2DBatchCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
+                                 void* args) const
+{
+    for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+}
+
 std::string D2HCopyInitiator::Name() const { return "memcpy"; }
 
 void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,

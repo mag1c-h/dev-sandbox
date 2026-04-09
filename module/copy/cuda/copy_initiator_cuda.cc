@@ -38,6 +38,17 @@ void H2DCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, siz
     }
 }
 
+std::string H2DBatchCopyInitiator::Name() const { return "CE"; }
+
+void H2DBatchCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
+                                 void* args) const
+{
+    auto stream = static_cast<cudaStream_t>(args);
+    for (size_t i = 0; i < number; ++i) {
+        CUDA_ASSERT(cudaMemcpyAsync(dst[i], src[i], size, cudaMemcpyHostToDevice, stream));
+    }
+}
+
 std::string D2HCopyInitiator::Name() const { return "CE"; }
 
 void D2HCopyInitiator::Copy(void* const* src, void* const* dst, size_t size, size_t number,
