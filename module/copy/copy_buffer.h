@@ -50,18 +50,4 @@ public:
     }
 };
 
-class CopyBufferHost : public CopyBuffer {
-public:
-    CopyBufferHost(size_t device, size_t size, size_t number);
-    ~CopyBufferHost() override;
-    std::string Name() const override;
-};
-
-class CopyBufferDevice : public CopyBuffer {
-public:
-    CopyBufferDevice(size_t device, size_t size, size_t number);
-    ~CopyBufferDevice() override;
-    std::string Name() const override;
-};
-
 #endif  // COPY_BUFFER_H

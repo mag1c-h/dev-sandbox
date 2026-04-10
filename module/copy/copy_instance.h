@@ -29,6 +29,7 @@
 #include "copy_result.h"
 
 class CopyInstance {
+protected:
     const CopyInitiator* initiator_;
     size_t iterations_;
     bool affinitySrc_;
@@ -38,13 +39,15 @@ public:
         : initiator_(initiator), iterations_(iterations), affinitySrc_(affinitySrc)
     {
     }
-    CopyResult::Result DoCopy(const std::vector<const CopyBuffer*>& srcBuffers,
-                              const std::vector<const CopyBuffer*>& dstBuffers) const;
+    virtual ~CopyInstance() = default;
+    virtual CopyResult::Result DoCopyBatch(
+        const std::vector<const CopyBuffer*>& srcBuffers,
+        const std::vector<const CopyBuffer*>& dstBuffers) const = 0;
     CopyResult::Result DoCopy(const CopyBuffer* srcBuffer, const CopyBuffer* dstBuffer) const
     {
         std::vector<const CopyBuffer*> srcBuffers{srcBuffer};
         std::vector<const CopyBuffer*> dstBuffers{dstBuffer};
-        return DoCopy(srcBuffers, dstBuffers);
+        return DoCopyBatch(srcBuffers, dstBuffers);
     }
 };
 

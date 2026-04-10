@@ -21,34 +21,29 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#ifndef COPY_INSTANCE_H
-#define COPY_INSTANCE_H
+#ifndef COPY_INSTANCE_ASCEND_H
+#define COPY_INSTANCE_ASCEND_H
 
 #include <chrono>
-#include "copy_buffer.h"
-#include "copy_initiator.h"
-#include "copy_result.h"
+#include "copy_instance.h"
+#include "error_handle_ascend.h"
 
-class CopyInstance {
-    CopyInitiator* initiator_;
-    size_t iterations_;
-    bool affinitySrc_;
-
+class AscendCopyInstance : public CopyInstance {
     struct CopyStreamContext {
         size_t deviceId;
-        cudaStream_t stream;
-        cudaEvent_t endEvent;
+        aclrtStream stream;
+        aclrtEvent endEvent;
         size_t size;
         std::vector<void*> src;
         std::vector<void*> dst;
     };
 
-    size_t AffinityDeviceId(const CopyBuffer& src, const CopyBuffer& dst)
+    size_t AffinityDeviceId(const CopyBuffer& src, const CopyBuffer& dst) const
     {
         return (affinitySrc_ ? src : dst).Device();
     }
     std::vector<CopyStreamContext> Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
-                                           const std::vector<const CopyBuffer*>& dstBuffers)
+                                           const std::vector<const CopyBuffer*>& dstBuffers) const
     {
         const auto bufferNumber = srcBuffers.size();
         std::vector<CopyStreamContext> contexts(bufferNumber);
@@ -59,9 +54,9 @@ class CopyInstance {
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
             ctx.deviceId = AffinityDeviceId(src, dst);
-            CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
-            CUDA_ASSERT(cudaStreamCreateWithFlags(&ctx.stream, cudaStreamNonBlocking));
-            CUDA_ASSERT(cudaEventCreate(&ctx.endEvent, cudaEventDefault));
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            ASCEND_ASSERT(aclrtCreateStream(&ctx.stream));
+            ASCEND_ASSERT(aclrtCreateEvent(&ctx.endEvent));
             ctx.size = src.Size();
             ctx.src.reserve(src.Number());
             ctx.dst.reserve(dst.Number());
@@ -72,64 +67,62 @@ class CopyInstance {
         }
         return contexts;
     }
-    std::pair<size_t, std::vector<size_t>> DoCopy(const std::vector<CopyStreamContext>& contexts)
+    std::pair<size_t, std::vector<size_t>> DoCopyImpl(
+        const std::vector<CopyStreamContext>& contexts) const
     {
         using namespace std::chrono;
         const auto number = contexts.size();
-        cudaEvent_t totalStart, totalEnd;
+        aclrtEvent totalStart, totalEnd;
         auto& firstCtx = contexts[0];
-        CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-        CUDA_ASSERT(cudaEventCreate(&totalStart));
-        CUDA_ASSERT(cudaEventCreate(&totalEnd));
-        CUDA_ASSERT(cudaEventRecord(totalStart, firstCtx.stream));
+        ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalStart));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalEnd));
+        ASCEND_ASSERT(aclrtRecordEvent(totalStart, firstCtx.stream));
         std::vector<size_t> submitCosts;
         for (size_t i = 0; i < number; i++) {
             auto& ctx = contexts[i];
-            CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
-            if (i != 0) { CUDA_ASSERT(cudaStreamWaitEvent(ctx.stream, totalStart)); }
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            if (i != 0) { ASCEND_ASSERT(aclrtStreamWaitEvent(ctx.stream, totalStart)); }
             auto tp = steady_clock::now().time_since_epoch();
             initiator_->Copy(ctx.src.data(), ctx.dst.data(), ctx.size, ctx.src.size(), ctx.stream);
             auto submitCost = steady_clock::now().time_since_epoch() - tp;
             submitCosts.push_back(duration_cast<microseconds>(submitCost).count());
             if (i != 0) {
-                CUDA_ASSERT(cudaEventRecord(ctx.endEvent, ctx.stream));
-                CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-                CUDA_ASSERT(cudaStreamWaitEvent(firstCtx.stream, ctx.endEvent));
+                ASCEND_ASSERT(aclrtRecordEvent(ctx.endEvent, ctx.stream));
+                ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
+                ASCEND_ASSERT(aclrtStreamWaitEvent(firstCtx.stream, ctx.endEvent));
             }
         }
-        CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-        CUDA_ASSERT(cudaEventRecord(totalEnd, firstCtx.stream));
-        CUDA_ASSERT(cudaEventSynchronize(totalEnd));
+        ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
+        ASCEND_ASSERT(aclrtRecordEvent(totalEnd, firstCtx.stream));
+        ASCEND_ASSERT(aclrtSynchronizeEvent(totalEnd));
         float copyCostMs = 0.f;
-        CUDA_ASSERT(cudaEventElapsedTime(&copyCostMs, totalStart, totalEnd));
-        CUDA_ASSERT(cudaEventDestroy(totalStart));
-        CUDA_ASSERT(cudaEventDestroy(totalEnd));
+        ASCEND_ASSERT(aclrtEventElapsedTime(&copyCostMs, totalStart, totalEnd));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalStart));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalEnd));
         return {copyCostMs * 1e3, submitCosts};
     }
-    void CleanUp(const std::vector<CopyStreamContext>& contexts)
+    void CleanUp(const std::vector<CopyStreamContext>& contexts) const
     {
         for (auto& ctx : contexts) {
-            CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
-            CUDA_ASSERT(cudaEventDestroy(ctx.endEvent));
-            CUDA_ASSERT(cudaStreamDestroy(ctx.stream));
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            ASCEND_ASSERT(aclrtDestroyEvent(ctx.endEvent));
+            ASCEND_ASSERT(aclrtDestroyStream(ctx.stream));
         }
     }
 
 public:
-    CopyInstance(CopyInitiator* initiator, size_t iterations, bool affinitySrc)
-        : initiator_(initiator), iterations_(iterations), affinitySrc_(affinitySrc)
-    {
-    }
-    CopyResult::Result DoCopy(const std::vector<const CopyBuffer*>& srcBuffers,
-                              const std::vector<const CopyBuffer*>& dstBuffers)
+    using CopyInstance::CopyInstance;
+    CopyResult::Result DoCopyBatch(const std::vector<const CopyBuffer*>& srcBuffers,
+                                   const std::vector<const CopyBuffer*>& dstBuffers) const override
     {
         auto contexts = Prepare(srcBuffers, dstBuffers);
         constexpr auto warmup = 3;
-        for (auto i = 0; i < warmup; i++) { DoCopy(contexts); }
+        for (auto i = 0; i < warmup; i++) { DoCopyImpl(contexts); }
         std::vector<size_t> submitCostArray;
         std::vector<size_t> copyCostArray;
         for (size_t i = 0; i < iterations_; i++) {
-            auto [copyCost, submitCost] = DoCopy(contexts);
+            auto [copyCost, submitCost] = DoCopyImpl(contexts);
             copyCostArray.push_back(copyCost);
             submitCostArray.insert(submitCostArray.end(),
                                    std::make_move_iterator(submitCost.begin()),
@@ -144,12 +137,6 @@ public:
                 std::move(submitCostArray),
                 std::move(copyCostArray)};
     }
-    CopyResult::Result DoCopy(const CopyBuffer* srcBuffer, const CopyBuffer* dstBuffer)
-    {
-        std::vector<const CopyBuffer*> srcBuffers{srcBuffer};
-        std::vector<const CopyBuffer*> dstBuffers{dstBuffer};
-        return DoCopy(srcBuffers, dstBuffers);
-    }
 };
 
-#endif  // COPY_INSTANCE_H
+#endif  // COPY_INSTANCE_ASCEND_H

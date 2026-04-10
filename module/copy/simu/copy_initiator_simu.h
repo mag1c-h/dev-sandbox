@@ -21,15 +21,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#ifndef MEMBW_ERROR_HANDLE_H
-#define MEMBW_ERROR_HANDLE_H
+#ifndef COPY_INITIATOR_SIMU_H
+#define COPY_INITIATOR_SIMU_H
 
-#define MEMBW_ASSERT(expr)                                                                  \
-    do {                                                                                    \
-        if (!(expr)) {                                                                      \
-            fprintf(stderr, "Assertion failed: %s, at %s:%d\n", #expr, __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                             \
-        }                                                                                   \
-    } while (0)
+#include <cstring>
+#include "copy_initiator.h"
 
-#endif  // MEMBW_ERROR_HANDLE_H
+class MemcpyCopyInitiator : public CopyInitiator {
+public:
+    std::string Name() const override { return "memcpy"; }
+    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
+              void* args) const override
+    {
+        for (size_t i = 0; i < number; ++i) { std::memcpy(dst[i], src[i], size); }
+    }
+};
+
+#endif  // COPY_INITIATOR_SIMU_H

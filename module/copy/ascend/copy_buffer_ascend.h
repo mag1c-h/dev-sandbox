@@ -21,44 +21,49 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
+#ifndef COPY_BUFFER_ASCEND_H
+#define COPY_BUFFER_ASCEND_H
+
 #include <cstring>
 #include "copy_buffer.h"
 #include "error_handle_ascend.h"
 
-CopyBufferHost::CopyBufferHost(size_t device, size_t size, size_t number)
-    : CopyBuffer{device, size, number}
-{
-    const auto total = size * number;
-    ASCEND_ASSERT(aclrtSetDevice(device_));
-    ASCEND_ASSERT(aclrtMallocHost(&addr_, total));
-    std::memset(addr_, 'h', total);
-}
-
-CopyBufferHost::~CopyBufferHost()
-{
-    if (addr_) {
+class HostCopyBuffer : public CopyBuffer {
+public:
+    HostCopyBuffer(size_t device, size_t size, size_t number) : CopyBuffer{device, size, number}
+    {
+        const auto total = size * number;
         ASCEND_ASSERT(aclrtSetDevice(device_));
-        ASCEND_ASSERT(aclrtFreeHost(addr_));
+        ASCEND_ASSERT(aclrtMallocHost(&addr_, total));
+        std::memset(addr_, 'h', total);
     }
-}
+    ~HostCopyBuffer() override
+    {
+        if (addr_) {
+            ASCEND_ASSERT(aclrtSetDevice(device_));
+            ASCEND_ASSERT(aclrtFreeHost(addr_));
+        }
+    }
+    std::string Name() const override { return "acl::host::" + std::to_string(device_); }
+};
 
-std::string CopyBufferHost::Name() const { return "acl::host"; }
-
-CopyBufferDevice::CopyBufferDevice(size_t device, size_t size, size_t number)
-    : CopyBuffer{device, size, number}
-{
-    const auto total = size * number;
-    ASCEND_ASSERT(aclrtSetDevice(device_));
-    ASCEND_ASSERT(aclrtMalloc(&addr_, total, ACL_MEM_MALLOC_HUGE_FIRST));
-    ASCEND_ASSERT(aclrtMemset(addr_, total, 'd', total));
-}
-
-CopyBufferDevice::~CopyBufferDevice()
-{
-    if (addr_) {
+class DeviceCopyBuffer : public CopyBuffer {
+public:
+    DeviceCopyBuffer(size_t device, size_t size, size_t number) : CopyBuffer{device, size, number}
+    {
+        const auto total = size * number;
         ASCEND_ASSERT(aclrtSetDevice(device_));
-        ASCEND_ASSERT(aclrtFree(addr_));
+        ASCEND_ASSERT(aclrtMalloc(&addr_, total, ACL_MEM_MALLOC_HUGE_FIRST));
+        ASCEND_ASSERT(aclrtMemset(addr_, total, 'd', total));
     }
-}
+    ~DeviceCopyBuffer() override
+    {
+        if (addr_) {
+            ASCEND_ASSERT(aclrtSetDevice(device_));
+            ASCEND_ASSERT(aclrtFree(addr_));
+        }
+    }
+    std::string Name() const override { return "acl::device::" + std::to_string(device_); }
+};
 
-std::string CopyBufferDevice::Name() const { return "acl::device::" + std::to_string(device_); }
+#endif  // COPY_BUFFER_ASCEND_H

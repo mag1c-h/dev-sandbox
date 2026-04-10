@@ -21,40 +21,45 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
+#ifndef COPY_BUFFER_CUDA_H
+#define COPY_BUFFER_CUDA_H
+
 #include <cstring>
 #include "copy_buffer.h"
 #include "error_handle_cuda.h"
 
-CopyBufferHost::CopyBufferHost(size_t device, size_t size, size_t number)
-    : CopyBuffer{device, size, number}
-{
-    const auto total = size * number;
-    CUDA_ASSERT(cudaMallocHost(&addr_, total));
-    std::memset(addr_, 'h', total);
-}
-
-CopyBufferHost::~CopyBufferHost()
-{
-    if (addr_) { CUDA_ASSERT(cudaFreeHost(addr_)); }
-}
-
-std::string CopyBufferHost::Name() const { return "cuda::host"; }
-
-CopyBufferDevice::CopyBufferDevice(size_t device, size_t size, size_t number)
-    : CopyBuffer{device, size, number}
-{
-    const auto total = size * number;
-    CUDA_ASSERT(cudaSetDevice(device_));
-    CUDA_ASSERT(cudaMalloc(&addr_, total));
-    CUDA_ASSERT(cudaMemset(addr_, 'd', total));
-}
-
-CopyBufferDevice::~CopyBufferDevice()
-{
-    if (addr_) {
-        CUDA_ASSERT(cudaSetDevice(device_));
-        CUDA_ASSERT(cudaFree(addr_));
+class HostCopyBuffer : public CopyBuffer {
+public:
+    HostCopyBuffer(size_t device, size_t size, size_t number) : CopyBuffer{device, size, number}
+    {
+        const auto total = size * number;
+        CUDA_ASSERT(cudaMallocHost(&addr_, total));
+        std::memset(addr_, 'h', total);
     }
-}
+    ~HostCopyBuffer() override
+    {
+        if (addr_) { CUDA_ASSERT(cudaFreeHost(addr_)); }
+    }
+    std::string Name() const override { return "cuda::host::" + std::to_string(device_); }
+};
 
-std::string CopyBufferDevice::Name() const { return "cuda::device::" + std::to_string(device_); }
+class DeviceCopyBuffer : public CopyBuffer {
+public:
+    DeviceCopyBuffer(size_t device, size_t size, size_t number) : CopyBuffer{device, size, number}
+    {
+        const auto total = size * number;
+        CUDA_ASSERT(cudaSetDevice(device_));
+        CUDA_ASSERT(cudaMalloc(&addr_, total));
+        CUDA_ASSERT(cudaMemset(addr_, 'd', total));
+    }
+    ~DeviceCopyBuffer() override
+    {
+        if (addr_) {
+            CUDA_ASSERT(cudaSetDevice(device_));
+            CUDA_ASSERT(cudaFree(addr_));
+        }
+    }
+    std::string Name() const override { return "cuda::device::" + std::to_string(device_); }
+};
+
+#endif  // COPY_BUFFER_CUDA_H

@@ -21,47 +21,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
+#include "copy_buffer_cuda.h"
 #include "copy_case.h"
-#include "copy_instance.h"
-
-template <typename T>
-class Registrar {
-public:
-    Registrar() { CopyCaseFactory::Instance().Register(std::make_shared<T>()); }
-};
-
-#define DEFINE_COPY_CASE(ClassName, Key, Brief, Ctx)            \
-    class ClassName : public CopyCase {                         \
-    public:                                                     \
-        ClassName() : CopyCase(Key, Brief) {}                   \
-        void Run(const Context&) const override;                \
-    };                                                          \
-    static Registrar<ClassName> global_##ClassName##_registrar; \
-    void ClassName::Run(const Context& Ctx) const
+#include "copy_initiator_cuda.h"
+#include "copy_instance_cuda.h"
 
 DEFINE_COPY_CASE(Host2DeviceCECase, "host_to_device_ce",
                  "memcpy from host to device with ce one by one", ctx)
 {
     H2DCopyInitiator initiator;
-    CopyInstance instance{&initiator, ctx.iter, false};
+    CudaCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferHost srcBuffer{device, ctx.size, ctx.num};
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
-        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
-    }
-    result.Show("[[ " + Key() + " ]] " + Brief());
-}
-
-DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
-                 "memcpy from host to device with batch ce one by one", ctx)
-{
-    CopyResult result;
-    for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferHost srcBuffer{device, ctx.size, ctx.num};
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
-        H2DBatchCopyInitiator initiator{device};
-        CopyInstance instance{&initiator, ctx.iter, false};
+        HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -72,10 +45,10 @@ DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
 {
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferHost srcBuffer{device, ctx.size, ctx.num};
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
+        HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         SMCopyInitiator initiator(device, ctx.num);
-        CopyInstance instance{&initiator, ctx.iter, false};
+        CudaCopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -85,11 +58,11 @@ DEFINE_COPY_CASE(OneHost2AllDeviceCECase, "one_host_to_all_device_ce",
                  "memcpy from one host to all device with ce", ctx)
 {
     H2DCopyInitiator initiator;
-    CopyInstance instance{&initiator, ctx.iter, false};
+    CudaCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    CopyBufferHost srcBuffer{0, ctx.size, ctx.num};
+    HostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -99,11 +72,11 @@ DEFINE_COPY_CASE(OneHost2AllDeviceSMCase, "one_host_to_all_device_sm",
                  "memcpy from one host to all device with sm", ctx)
 {
     CopyResult result;
-    CopyBufferHost srcBuffer{0, ctx.size, ctx.num};
+    HostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         SMCopyInitiator initiator{device, ctx.num};
-        CopyInstance instance{&initiator, ctx.iter, false};
+        CudaCopyInstance instance{&initiator, ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -113,15 +86,15 @@ DEFINE_COPY_CASE(AllHost2AllDeviceCECase, "all_host_to_all_device_ce",
                  "memcpy from all host to all device with ce at one time", ctx)
 {
     H2DCopyInitiator initiator;
-    CopyInstance instance{&initiator, ctx.iter, false};
+    CudaCopyInstance instance{&initiator, ctx.iter, false};
     std::vector<const CopyBuffer*> srcBuffers(ctx.nDevice);
     std::vector<const CopyBuffer*> dstBuffers(ctx.nDevice);
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        srcBuffers[device] = new CopyBufferHost{device, ctx.size, ctx.num};
-        dstBuffers[device] = new CopyBufferDevice{device, ctx.size, ctx.num};
+        srcBuffers[device] = new HostCopyBuffer{device, ctx.size, ctx.num};
+        dstBuffers[device] = new DeviceCopyBuffer{device, ctx.size, ctx.num};
     }
     CopyResult result;
-    result.Push(instance.DoCopy(srcBuffers, dstBuffers));
+    result.Push(instance.DoCopyBatch(srcBuffers, dstBuffers));
     for (size_t device = 0; device < ctx.nDevice; device++) {
         delete srcBuffers[device];
         delete dstBuffers[device];
@@ -133,11 +106,11 @@ DEFINE_COPY_CASE(Device2DeviceCECase, "device_to_device_ce",
                  "memcpy from device to device with ce one by one", ctx)
 {
     D2DCopyInitiator initiator;
-    CopyInstance instance{&initiator, ctx.iter, false};
+    CudaCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferDevice srcBuffer{device, ctx.size, ctx.num};
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -147,11 +120,11 @@ DEFINE_COPY_CASE(OneDevice2AllDeviceCECase, "one_device_to_all_device_ce",
                  "memcpy from one device to all device with ce", ctx)
 {
     D2DCopyInitiator initiator;
-    CopyInstance instance{&initiator, ctx.iter, false};
+    CudaCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
-    CopyBufferDevice srcBuffer{0, ctx.size, ctx.num};
+    DeviceCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
-        CopyBufferDevice dstBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());

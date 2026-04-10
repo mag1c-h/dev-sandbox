@@ -1,8 +1,4 @@
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(logger)
-add_subdirectory(membw)
-add_subdirectory(nvbw)
-add_subdirectory(aclbw)
 add_subdirectory(aio)
-add_subdirectory(nvcopy)
 add_subdirectory(copy)

@@ -35,47 +35,4 @@ public:
                       void* args) const = 0;
 };
 
-class H2DCopyInitiator : public CopyInitiator {
-public:
-    std::string Name() const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
-class H2DBatchCopyInitiator : public CopyInitiator {
-    size_t device_;
-
-public:
-    explicit H2DBatchCopyInitiator(size_t device) : device_{device} {}
-    std::string Name() const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
-class D2HCopyInitiator : public CopyInitiator {
-public:
-    std::string Name() const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
-class D2DCopyInitiator : public CopyInitiator {
-public:
-    std::string Name() const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
-class SMCopyInitiator : public CopyInitiator {
-    void* dSrc_{nullptr};
-    void* dDst_{nullptr};
-
-public:
-    SMCopyInitiator(size_t device, size_t number);
-    ~SMCopyInitiator() override;
-    std::string Name() const override;
-    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
-              void* args) const override;
-};
-
 #endif

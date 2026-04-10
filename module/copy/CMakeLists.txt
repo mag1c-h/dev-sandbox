@@ -1,4 +1,4 @@
-add_executable(copy copy_main.cc copy_case.cc)
+add_executable(copy copy_main.cc)
 target_include_directories(copy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(copy PRIVATE fmt::fmt)
 if (CUDA_RUNTIME_API_PATH AND CUDA_RUNTIME_LIB)

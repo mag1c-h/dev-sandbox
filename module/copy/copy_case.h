@@ -60,4 +60,19 @@ public:
     const std::vector<std::shared_ptr<CopyCase>>& AllCases() const { return cases_; }
 };
 
+template <typename T>
+class Registrar {
+public:
+    Registrar() { CopyCaseFactory::Instance().Register(std::make_shared<T>()); }
+};
+
+#define DEFINE_COPY_CASE(ClassName, Key, Brief, Ctx)            \
+    class ClassName : public CopyCase {                         \
+    public:                                                     \
+        ClassName() : CopyCase(Key, Brief) {}                   \
+        void Run(const Context&) const override;                \
+    };                                                          \
+    static Registrar<ClassName> global_##ClassName##_registrar; \
+    void ClassName::Run(const Context& Ctx) const
+
 #endif
