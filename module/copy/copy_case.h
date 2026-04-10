@@ -62,6 +62,8 @@ public:
 
 template <typename T>
 class Registrar {
+    static_assert(std::is_base_of_v<CopyCase, T>, "T must inherit CopyCase");
+
 public:
     Registrar() { CopyCaseFactory::Instance().Register(std::make_shared<T>()); }
 };
