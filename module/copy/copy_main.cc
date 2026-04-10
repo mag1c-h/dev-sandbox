@@ -87,7 +87,7 @@ struct ArgsParser {
                 ctx.nDevice = ParseUnsigned(argv[++i], "Invalid device count.");
             } else {
                 Help(argv[0]);
-                std::exit(EXIT_SUCCESS);
+                std::exit(EXIT_FAILURE);
             }
         }
     }
