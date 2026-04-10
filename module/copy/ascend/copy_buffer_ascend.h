@@ -25,6 +25,7 @@
 #define COPY_BUFFER_ASCEND_H
 
 #include <cstring>
+#include <sys/mman.h>
 #include "copy_buffer.h"
 #include "error_handle_ascend.h"
 
@@ -45,6 +46,31 @@ public:
         }
     }
     std::string Name() const override { return "acl::host::" + std::to_string(device_); }
+};
+
+class AnonymousCopyBuffer : public CopyBuffer {
+public:
+    AnonymousCopyBuffer(size_t device, size_t size, size_t number)
+        : CopyBuffer{device, size, number}
+    {
+        const auto total = size * number;
+        ASCEND_ASSERT(aclrtSetDevice(device_));
+        constexpr auto prot = PROT_READ | PROT_WRITE;
+        constexpr auto flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE;
+        addr_ = mmap(nullptr, total, prot, flags, -1, 0);
+        ASSERT(addr_ != MAP_FAILED);
+        std::memset(addr_, 'a', total);
+        ASCEND_ASSERT(aclrtHostRegisterV2(addr_, total, ACL_HOST_REG_MAPPED | ACL_HOST_REG_PINNED));
+    }
+    ~AnonymousCopyBuffer() override
+    {
+        if (addr_) {
+            ASCEND_ASSERT(aclrtSetDevice(device_));
+            ASCEND_ASSERT(aclrtHostUnregister(addr_));
+            munmap(addr_, size_ * number_);
+        }
+    }
+    std::string Name() const override { return "acl::anon::" + std::to_string(device_); }
 };
 
 class DeviceCopyBuffer : public CopyBuffer {

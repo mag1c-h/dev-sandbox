@@ -115,3 +115,17 @@ DEFINE_COPY_CASE(OneDevice2AllDeviceCECase, "one_device_to_all_device_ce",
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
+
+DEFINE_COPY_CASE(Anonymous2DeviceCECase, "anonymous_to_device_ce",
+                 "memcpy from anonymous to device one by one", ctx)
+{
+    H2DCopyInitiator initiator;
+    AscendCopyInstance instance{&initiator, ctx.iter, false};
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        AnonymousCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
