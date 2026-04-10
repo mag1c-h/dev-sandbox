@@ -21,7 +21,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#include <algorithm>
 #include <charconv>
 #include <fmt/format.h>
 #include <unordered_set>
@@ -101,14 +100,13 @@ int main(int argc, char const* argv[])
         return -1;
     }
     CopyRuntime runtime;
-    const auto cases = CopyCaseFactory::Instance().AllCases();
-    std::vector<std::shared_ptr<CopyCase>> filtered;
-    std::copy_if(cases.begin(), cases.end(), std::back_inserter(filtered),
-                 [&args](const auto& c) { return args.names.find(c->Key()) != args.names.end(); });
-    if (filtered.empty()) {
-        for (auto& c : cases) { fmt::println("{:<32}: {}", c->Key(), c->Brief()); }
+    const auto cases = CopyCaseFactory::Instance().Filter(args.names);
+    if (cases.empty()) {
+        for (auto& c : CopyCaseFactory::Instance().AllCases()) {
+            fmt::println("{:<32}: {}", c->Key(), c->Brief());
+        }
         return -1;
     }
-    for (auto& c : filtered) { c->Run(args.ctx); }
+    for (auto& c : cases) { c->Run(args.ctx); }
     return 0;
 }

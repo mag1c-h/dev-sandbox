@@ -26,6 +26,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class CopyCase {
@@ -58,6 +59,16 @@ public:
     }
     void Register(std::shared_ptr<CopyCase> c) { cases_.push_back(std::move(c)); }
     const std::vector<std::shared_ptr<CopyCase>>& AllCases() const { return cases_; }
+    std::vector<std::shared_ptr<CopyCase>> Filter(
+        const std::unordered_set<std::string>& names) const
+    {
+        std::vector<std::shared_ptr<CopyCase>> result;
+        if (names.empty()) { return cases_; }
+        for (auto& c : cases_) {
+            if (names.find(c->Key()) != names.end()) { result.push_back(c); }
+        }
+        return result;
+    }
 };
 
 template <typename T>
