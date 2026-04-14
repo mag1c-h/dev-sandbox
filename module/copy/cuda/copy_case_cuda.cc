@@ -40,6 +40,20 @@ DEFINE_COPY_CASE(Host2DeviceCECase, "host_to_device_ce",
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
+DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
+                 "memcpy from host to device with batch ce one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        H2DBatchCopyInitiator initiator{device};
+        CudaCopyInstance instance{&initiator, ctx.iter, false};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
 DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
                  "memcpy from host to device with sm one by one", ctx)
 {

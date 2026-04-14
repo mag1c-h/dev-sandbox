@@ -56,6 +56,33 @@ public:
     }
 };
 
+class H2DBatchCopyInitiator : public CopyInitiator {
+    size_t device_;
+
+public:
+    H2DBatchCopyInitiator(size_t device) : CopyInitiator{}, device_{device} {}
+    std::string Name() const override { return "BatchCE"; }
+    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
+              void* args) const override
+    {
+        auto stream = static_cast<cudaStream_t>(args);
+        cudaMemcpyAttributes attr;
+        std::memset(&attr, 0, sizeof(attr));
+        attr.srcAccessOrder = cudaMemcpySrcAccessOrderAny;
+        attr.srcLocHint.type = cudaMemLocationTypeHost;
+        attr.dstLocHint.type = cudaMemLocationTypeDevice;
+        attr.dstLocHint.id = device_;
+        attr.flags = cudaMemcpyFlagPreferOverlapWithCompute;
+        std::vector<cudaMemcpyAttributes> attrArray{attr};
+        std::vector<size_t> attrIdxArray(number, 0);
+        std::vector<size_t> sizeArray(number, size);
+        size_t failureIdx = 0;
+        CUDA_ASSERT(cudaMemcpyBatchAsync(
+            const_cast<void**>(dst), const_cast<void**>(src), sizeArray.data(), number,
+            attrArray.data(), attrIdxArray.data(), attrArray.size(), &failureIdx, stream));
+    }
+};
+
 class SMCopyInitiator : public CopyInitiator {
     void* dSrc_{nullptr};
     void* dDst_{nullptr};
