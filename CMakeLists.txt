@@ -1,23 +1,12 @@
 cmake_minimum_required(VERSION 3.18)
 project(dev-sandbox VERSION 1.0.0 LANGUAGES CXX)
 
-set(CUDA_ROOT "/usr/local/cuda/" CACHE PATH "Path to CUDA root directory")
-set(ASCEND_ROOT "/usr/local/Ascend/ascend-toolkit/latest" CACHE PATH "Path to Ascend root directory")
-find_path(CUDA_RUNTIME_API_PATH cuda_runtime.h ${CUDA_ROOT}/include)
-find_library(CUDA_RUNTIME_LIB cudart ${CUDA_ROOT}/lib64)
-find_path(ASCEND_RUNTIME_API_PATH acl/acl.h ${ASCEND_ROOT}/include)
-find_library(ASCEND_RUNTIME_LIB ascendcl ${ASCEND_ROOT}/lib64)
-if (CUDA_RUNTIME_API_PATH AND CUDA_RUNTIME_LIB)
-    message(STATUS "Found CUDA runtime API: ${CUDA_RUNTIME_API_PATH}")
-    set(CMAKE_CUDA_COMPILER ${CUDA_ROOT}/bin/nvcc)
-    set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89 90)
-    enable_language(CUDA)
-elseif(ASCEND_RUNTIME_API_PATH AND ASCEND_RUNTIME_LIB)
-    message(STATUS "Found Ascend runtime API: ${ASCEND_RUNTIME_API_PATH}")
-else()
-    message(STATUS "Neither CUDA nor Ascend runtime API found.")
-endif()
+# Runtime backend detection
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(DetectRuntime)
+detect_runtime_backend()
 
+# C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -27,14 +27,21 @@ cmake --build build -j
 
 项目会根据环境自动选择编译目标：
 
-1. **CUDA**: 检测 `/usr/local/cuda/`，编译 CUDA 内核（`*.cu`）
-2. **Ascend**: 检测 `/usr/local/Ascend/ascend-toolkit/latest`，编译 Ascend 实现
-3. **模拟模式**: 无 GPU 时编译纯 CPU 模拟版本
+**检测优先级**：
+1. CACHE 变量：`-DCUDA_ROOT=...` 或 `-DASCEND_ROOT=...`
+2. 环境变量：`CUDA_HOME`/`CUDA_PATH` 或 `ASCEND_HOME`/`ASCEND_TOOLKIT_HOME`
+3. 默认路径：`/usr/local/cuda` 或 `/usr/local/Ascend/ascend-toolkit/latest`
+
+**编译目标**：
+- **CUDA**: 检测成功后编译 CUDA 内核（`*.cu`）
+- **Ascend**: 检测成功后编译 Ascend 实现
+- **模拟模式**: 无 GPU 时编译纯 CPU 模拟版本
 
 相关源文件位于 `module/*/cuda`、`module/*/ascend`、`module/*/simu` 子目录。
 
 ## 模块结构
 
+- `cmake/`: CMake 模块（`DetectRuntime.cmake` 运行时检测）
 - `module/aio`: 异步 I/O 性能测试工具
 - `module/copy`: 设备间内存拷贝性能测试
 - `module/logger`: 日志库
