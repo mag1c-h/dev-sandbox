@@ -129,3 +129,18 @@ DEFINE_COPY_CASE(Anonymous2DeviceCECase, "anonymous_to_device_ce",
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
+
+DEFINE_COPY_CASE(Host2DeviceCEMultiStreamCase, "host_to_device_ce_multi_stream",
+                 "memcpy from host to device with ce using multi stream one by one", ctx)
+{
+    constexpr auto streamCount = 48;
+    H2DCopyInitiator initiator;
+    AscendMultiStreamCopyInstance instance{&initiator, ctx.iter, false, streamCount};
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
