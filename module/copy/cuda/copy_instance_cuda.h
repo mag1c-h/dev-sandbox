@@ -174,7 +174,7 @@ protected:
     void CopyInternal(const CopyContext& ctx) override
     {
         for (size_t i = 0; i < ctx.src.size(); i++) {
-            CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyDeviceToDevice,
+            CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyDeviceToHost,
                                         ctx.stream));
         }
     }
