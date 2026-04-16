@@ -35,7 +35,7 @@
 extern cudaError_t CudaSMCopyBatchAsync(void* src[], void* dst[], size_t size, size_t number,
                                         cudaStream_t stream);
 
-struct CudaStreamContext {
+struct CopyContext {
     size_t deviceId;
     cudaStream_t stream;
     cudaEvent_t endEvent;
@@ -44,9 +44,9 @@ struct CudaStreamContext {
     std::vector<void*> dst;
 };
 
-class CudaCopyInstanceBase : public CopyInstance {
+class BaseCopyInstance : public CopyInstance {
 protected:
-    std::vector<CudaStreamContext> contexts_;
+    std::vector<CopyContext> contexts_;
     cudaEvent_t totalStart_;
     cudaEvent_t totalEnd_;
 
@@ -61,7 +61,7 @@ protected:
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
 
-            CudaStreamContext ctx;
+            CopyContext ctx;
             ctx.deviceId = AffinityDeviceId(src, dst);
             ctx.size = src.Size();
             CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
@@ -131,19 +131,31 @@ protected:
         return {copyCost, submitCost};
     }
 
-    virtual void CopyInternal(const CudaStreamContext& ctx) = 0;
-    virtual void SynchronizeInternal(const CudaStreamContext& ctx) = 0;
+    virtual void CopyInternal(const CopyContext& ctx) = 0;
+    virtual void SynchronizeInternal(const CopyContext& ctx) = 0;
 
 public:
-    CudaCopyInstanceBase(size_t iterations, bool affinitySrc)
-        : CopyInstance(iterations, affinitySrc)
-    {
-    }
+    BaseCopyInstance(size_t iterations, bool affinitySrc) : CopyInstance(iterations, affinitySrc) {}
 };
 
-class H2DCECopyInstance : public CudaCopyInstanceBase {
+class CECopyInstance : public BaseCopyInstance {
 protected:
-    void CopyInternal(const CudaStreamContext& ctx) override
+    void SynchronizeInternal(const CopyContext& ctx) override
+    {
+        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+
+public:
+    CECopyInstance(size_t iterations, bool affinitySrc) : BaseCopyInstance(iterations, affinitySrc)
+    {
+    }
+
+    std::string Name() const override { return "CE"; }
+};
+
+class H2DCECopyInstance : public CECopyInstance {
+protected:
+    void CopyInternal(const CopyContext& ctx) override
     {
         for (size_t i = 0; i < ctx.src.size(); i++) {
             CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyHostToDevice,
@@ -151,32 +163,51 @@ protected:
         }
     }
 
-    void SynchronizeInternal(const CudaStreamContext& ctx) override
+public:
+    H2DCECopyInstance(size_t iterations, bool affinitySrc) : CECopyInstance(iterations, affinitySrc)
     {
-        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+};
+
+class D2HCECopyInstance : public CECopyInstance {
+protected:
+    void CopyInternal(const CopyContext& ctx) override
+    {
+        for (size_t i = 0; i < ctx.src.size(); i++) {
+            CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyDeviceToDevice,
+                                        ctx.stream));
+        }
     }
 
 public:
-    H2DCECopyInstance(size_t iterations, bool affinitySrc)
-        : CudaCopyInstanceBase(iterations, affinitySrc)
+    D2HCECopyInstance(size_t iterations, bool affinitySrc) : CECopyInstance(iterations, affinitySrc)
+    {
+    }
+};
+
+class BatchCECopyInstance : public CECopyInstance {
+protected:
+    size_t device_;
+
+public:
+    BatchCECopyInstance(size_t iterations, bool affinitySrc, size_t device)
+        : CECopyInstance(iterations, affinitySrc), device_(device)
     {
     }
 
-    std::string Name() const override { return "CE"; }
+    std::string Name() const override { return "BatchCE"; }
 };
 
-class H2DBatchCECopyInstance : public CudaCopyInstanceBase {
+class H2DBatchCECopyInstance : public BatchCECopyInstance {
 protected:
-    size_t targetDevice_;
-
-    void CopyInternal(const CudaStreamContext& ctx) override
+    void CopyInternal(const CopyContext& ctx) override
     {
         cudaMemcpyAttributes attr;
         std::memset(&attr, 0, sizeof(attr));
         attr.srcAccessOrder = cudaMemcpySrcAccessOrderAny;
         attr.srcLocHint.type = cudaMemLocationTypeHost;
         attr.dstLocHint.type = cudaMemLocationTypeDevice;
-        attr.dstLocHint.id = targetDevice_;
+        attr.dstLocHint.id = device_;
         attr.flags = cudaMemcpyFlagPreferOverlapWithCompute;
 
         std::vector<cudaMemcpyAttributes> attrArray{attr};
@@ -190,28 +221,52 @@ protected:
                                          attrArray.size(), &failureIdx, ctx.stream));
     }
 
-    void SynchronizeInternal(const CudaStreamContext& ctx) override
+public:
+    H2DBatchCECopyInstance(size_t iterations, bool affinitySrc, size_t device)
+        : BatchCECopyInstance(iterations, affinitySrc, device)
     {
-        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+};
+
+class D2HBatchCECopyInstance : public BatchCECopyInstance {
+protected:
+    void CopyInternal(const CopyContext& ctx) override
+    {
+        cudaMemcpyAttributes attr;
+        std::memset(&attr, 0, sizeof(attr));
+        attr.srcAccessOrder = cudaMemcpySrcAccessOrderAny;
+        attr.srcLocHint.type = cudaMemLocationTypeDevice;
+        attr.srcLocHint.id = device_;
+        attr.dstLocHint.type = cudaMemLocationTypeHost;
+        attr.dstLocHint.id = device_;
+        attr.flags = cudaMemcpyFlagPreferOverlapWithCompute;
+
+        std::vector<cudaMemcpyAttributes> attrArray{attr};
+        std::vector<size_t> attrIdxArray(ctx.src.size(), 0);
+        std::vector<size_t> sizeArray(ctx.src.size(), ctx.size);
+        size_t failureIdx = 0;
+
+        CUDA_ASSERT(cudaMemcpyBatchAsync(const_cast<void**>(ctx.dst.data()),
+                                         const_cast<void**>(ctx.src.data()), sizeArray.data(),
+                                         ctx.src.size(), attrArray.data(), attrIdxArray.data(),
+                                         attrArray.size(), &failureIdx, ctx.stream));
     }
 
 public:
-    H2DBatchCECopyInstance(size_t iterations, bool affinitySrc, size_t targetDevice)
-        : CudaCopyInstanceBase(iterations, affinitySrc), targetDevice_(targetDevice)
+    D2HBatchCECopyInstance(size_t iterations, bool affinitySrc, size_t device)
+        : BatchCECopyInstance(iterations, affinitySrc, device)
     {
     }
-
-    std::string Name() const override { return "BatchCE"; }
 };
 
-class H2DSMCopyInstance : public CudaCopyInstanceBase {
+class SMCopyInstance : public BaseCopyInstance {
 protected:
-    size_t targetDevice_;
-    size_t maxNumber_;
+    size_t device_;
+    size_t number_;
     void* dSrc_;
     void* dDst_;
 
-    void CopyInternal(const CudaStreamContext& ctx) override
+    void CopyInternal(const CopyContext& ctx) override
     {
         size_t ptrSize = sizeof(void*) * ctx.src.size();
         CUDA_ASSERT(
@@ -222,27 +277,27 @@ protected:
                                          ctx.size, ctx.src.size(), ctx.stream));
     }
 
-    void SynchronizeInternal(const CudaStreamContext& ctx) override
+    void SynchronizeInternal(const CopyContext& ctx) override
     {
         CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
     }
 
 public:
-    H2DSMCopyInstance(size_t iterations, bool affinitySrc, size_t targetDevice, size_t maxNumber)
-        : CudaCopyInstanceBase(iterations, affinitySrc),
-          targetDevice_(targetDevice),
-          maxNumber_(maxNumber),
+    SMCopyInstance(size_t iterations, bool affinitySrc, size_t device, size_t number)
+        : BaseCopyInstance(iterations, affinitySrc),
+          device_(device),
+          number_(number),
           dSrc_(nullptr),
           dDst_(nullptr)
     {
-        CUDA_ASSERT(cudaSetDevice(targetDevice_));
-        CUDA_ASSERT(cudaMalloc(&dSrc_, sizeof(void*) * maxNumber_));
-        CUDA_ASSERT(cudaMalloc(&dDst_, sizeof(void*) * maxNumber_));
+        CUDA_ASSERT(cudaSetDevice(device_));
+        CUDA_ASSERT(cudaMalloc(&dSrc_, sizeof(void*) * number_));
+        CUDA_ASSERT(cudaMalloc(&dDst_, sizeof(void*) * number_));
     }
 
-    ~H2DSMCopyInstance()
+    ~SMCopyInstance()
     {
-        CUDA_ASSERT(cudaSetDevice(targetDevice_));
+        CUDA_ASSERT(cudaSetDevice(device_));
         if (dSrc_) CUDA_ASSERT(cudaFree(dSrc_));
         if (dDst_) CUDA_ASSERT(cudaFree(dDst_));
     }
@@ -250,9 +305,9 @@ public:
     std::string Name() const override { return "SM"; }
 };
 
-class D2DCECopyInstance : public CudaCopyInstanceBase {
+class D2DCECopyInstance : public CECopyInstance {
 protected:
-    void CopyInternal(const CudaStreamContext& ctx) override
+    void CopyInternal(const CopyContext& ctx) override
     {
         for (size_t i = 0; i < ctx.src.size(); i++) {
             CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyDeviceToDevice,
@@ -260,18 +315,10 @@ protected:
         }
     }
 
-    void SynchronizeInternal(const CudaStreamContext& ctx) override
-    {
-        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
-    }
-
 public:
-    D2DCECopyInstance(size_t iterations, bool affinitySrc)
-        : CudaCopyInstanceBase(iterations, affinitySrc)
+    D2DCECopyInstance(size_t iterations, bool affinitySrc) : CECopyInstance(iterations, affinitySrc)
     {
     }
-
-    std::string Name() const override { return "CE"; }
 };
 
 #endif  // COPY_INSTANCE_CUDA_H

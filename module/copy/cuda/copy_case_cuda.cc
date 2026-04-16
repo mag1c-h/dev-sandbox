@@ -38,6 +38,19 @@ DEFINE_COPY_CASE(Host2DeviceCECase, "host_to_device_ce",
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
+DEFINE_COPY_CASE(Device2HostCECase, "device_to_host_ce",
+                 "memcpy from device to host with ce one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        HostCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        D2HCECopyInstance instance{ctx.iter, false};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
 DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
                  "memcpy from host to device with batch ce one by one", ctx)
 {
@@ -51,6 +64,19 @@ DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
+DEFINE_COPY_CASE(Device2HostBatchCECase, "device_to_host_batch_ce",
+                 "memcpy from device to host with batch ce one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        HostCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        D2HBatchCECopyInstance instance{ctx.iter, false, device};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
 DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
                  "memcpy from host to device with sm one by one", ctx)
 {
@@ -58,7 +84,20 @@ DEFINE_COPY_CASE(Host2DeviceSMCase, "host_to_device_sm",
     for (size_t device = 0; device < ctx.nDevice; device++) {
         HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
-        H2DSMCopyInstance instance{ctx.iter, false, device, ctx.num};
+        SMCopyInstance instance{ctx.iter, false, device, ctx.num};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
+DEFINE_COPY_CASE(Device2HostSMCase, "device_to_host_sm",
+                 "memcpy from device to host with sm one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        HostCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        SMCopyInstance instance{ctx.iter, false, device, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -84,7 +123,7 @@ DEFINE_COPY_CASE(OneHost2AllDeviceSMCase, "one_host_to_all_device_sm",
     HostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
-        H2DSMCopyInstance instance{ctx.iter, false, device, ctx.num};
+        SMCopyInstance instance{ctx.iter, false, device, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -148,6 +187,19 @@ DEFINE_COPY_CASE(Anonymous2DeviceCECase, "anonymous_to_device_ce",
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
 
+DEFINE_COPY_CASE(Device2AnonymousCECase, "device_to_anonymous_ce",
+                 "memcpy from device to anonymous one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        AnonymousCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        D2HCECopyInstance instance{ctx.iter, false};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
 DEFINE_COPY_CASE(Anonymous2DeviceSMCase, "anonymous_to_device_sm",
                  "memcpy from anonymous to device with sm one by one", ctx)
 {
@@ -155,7 +207,20 @@ DEFINE_COPY_CASE(Anonymous2DeviceSMCase, "anonymous_to_device_sm",
     for (size_t device = 0; device < ctx.nDevice; device++) {
         AnonymousCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
-        H2DSMCopyInstance instance{ctx.iter, false, device, ctx.num};
+        SMCopyInstance instance{ctx.iter, false, device, ctx.num};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
+
+DEFINE_COPY_CASE(Device2AnonymousSMCase, "device_to_anonymous_sm",
+                 "memcpy from device to anonymous with sm one by one", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        AnonymousCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        SMCopyInstance instance{ctx.iter, false, device, ctx.num};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
