@@ -23,18 +23,16 @@
  * */
 #include "copy_buffer_ascend.h"
 #include "copy_case.h"
-#include "copy_initiator_ascend.h"
 #include "copy_instance_ascend.h"
 
 DEFINE_COPY_CASE(Host2DeviceCECase, "host_to_device_ce",
                  "memcpy from host to device with ce one by one", ctx)
 {
-    H2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
         HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        H2DCECopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -47,8 +45,7 @@ DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
     for (size_t device = 0; device < ctx.nDevice; device++) {
         HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
-        H2DBatchCopyInitiator initiator{device};
-        AscendCopyInstance instance{&initiator, ctx.iter, false};
+        H2DBatchCECopyInstance instance{ctx.iter, false, device};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -57,12 +54,11 @@ DEFINE_COPY_CASE(Host2DeviceBatchCECase, "host_to_device_batch_ce",
 DEFINE_COPY_CASE(OneHost2AllDeviceCECase, "one_host_to_all_device_ce",
                  "memcpy from one host to all device with ce", ctx)
 {
-    H2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     HostCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        H2DCECopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -71,14 +67,13 @@ DEFINE_COPY_CASE(OneHost2AllDeviceCECase, "one_host_to_all_device_ce",
 DEFINE_COPY_CASE(AllHost2AllDeviceCECase, "all_host_to_all_device_ce",
                  "memcpy from all host to all device with ce at one time", ctx)
 {
-    H2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     std::vector<const CopyBuffer*> srcBuffers(ctx.nDevice);
     std::vector<const CopyBuffer*> dstBuffers(ctx.nDevice);
     for (size_t device = 0; device < ctx.nDevice; device++) {
         srcBuffers[device] = new HostCopyBuffer{device, ctx.size, ctx.num};
         dstBuffers[device] = new DeviceCopyBuffer{device, ctx.size, ctx.num};
     }
+    H2DCECopyInstance instance{ctx.iter, false};
     CopyResult result;
     result.Push(instance.DoCopyBatch(srcBuffers, dstBuffers));
     for (size_t device = 0; device < ctx.nDevice; device++) {
@@ -91,12 +86,11 @@ DEFINE_COPY_CASE(AllHost2AllDeviceCECase, "all_host_to_all_device_ce",
 DEFINE_COPY_CASE(Device2DeviceCECase, "device_to_device_ce",
                  "memcpy from device to device with ce one by one", ctx)
 {
-    D2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
         DeviceCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        D2DCECopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -105,12 +99,11 @@ DEFINE_COPY_CASE(Device2DeviceCECase, "device_to_device_ce",
 DEFINE_COPY_CASE(OneDevice2AllDeviceCECase, "one_device_to_all_device_ce",
                  "memcpy from one device to all device with ce", ctx)
 {
-    D2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     DeviceCopyBuffer srcBuffer{0, ctx.size, ctx.num};
     for (size_t device = 0; device < ctx.nDevice; device++) {
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        D2DCECopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -119,12 +112,11 @@ DEFINE_COPY_CASE(OneDevice2AllDeviceCECase, "one_device_to_all_device_ce",
 DEFINE_COPY_CASE(Anonymous2DeviceCECase, "anonymous_to_device_ce",
                  "memcpy from anonymous to device one by one", ctx)
 {
-    H2DCopyInitiator initiator;
-    AscendCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
         AnonymousCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        H2DCECopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -134,12 +126,11 @@ DEFINE_COPY_CASE(Host2DeviceCEMultiStreamCase, "host_to_device_ce_multi_stream",
                  "memcpy from host to device with ce using multi stream one by one", ctx)
 {
     constexpr auto streamCount = 48;
-    H2DCopyInitiator initiator;
-    AscendMultiStreamCopyInstance instance{&initiator, ctx.iter, false, streamCount};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
         HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        H2DCEMultiStreamCopyInstance instance{ctx.iter, false, streamCount};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());

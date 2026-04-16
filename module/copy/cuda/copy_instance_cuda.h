@@ -25,118 +25,253 @@
 #define COPY_INSTANCE_CUDA_H
 
 #include <chrono>
+#include <cstring>
+#include <utility>
+#include <vector>
+#include "copy_buffer.h"
 #include "copy_instance.h"
 #include "error_handle_cuda.h"
 
-class CudaCopyInstance : public CopyInstance {
-    struct CopyStreamContext {
-        size_t deviceId;
-        cudaStream_t stream;
-        cudaEvent_t endEvent;
-        size_t size;
-        std::vector<void*> src;
-        std::vector<void*> dst;
-    };
+extern cudaError_t CudaSMCopyBatchAsync(void* src[], void* dst[], size_t size, size_t number,
+                                        cudaStream_t stream);
 
-    size_t AffinityDeviceId(const CopyBuffer& src, const CopyBuffer& dst) const
+struct CudaStreamContext {
+    size_t deviceId;
+    cudaStream_t stream;
+    cudaEvent_t endEvent;
+    size_t size;
+    std::vector<void*> src;
+    std::vector<void*> dst;
+};
+
+class CudaCopyInstanceBase : public CopyInstance {
+protected:
+    std::vector<CudaStreamContext> contexts_;
+    cudaEvent_t totalStart_;
+    cudaEvent_t totalEnd_;
+
+    void Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
+                 const std::vector<const CopyBuffer*>& dstBuffers) override
     {
-        return (affinitySrc_ ? src : dst).Device();
-    }
-    std::vector<CopyStreamContext> Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
-                                           const std::vector<const CopyBuffer*>& dstBuffers) const
-    {
+        contexts_.clear();
         const auto bufferNumber = srcBuffers.size();
-        std::vector<CopyStreamContext> contexts(bufferNumber);
         for (size_t i = 0; i < bufferNumber; i++) {
-            auto& ctx = contexts[i];
             auto& src = *srcBuffers[i];
             auto& dst = *dstBuffers[i];
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
+
+            CudaStreamContext ctx;
             ctx.deviceId = AffinityDeviceId(src, dst);
+            ctx.size = src.Size();
             CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
             CUDA_ASSERT(cudaStreamCreateWithFlags(&ctx.stream, cudaStreamNonBlocking));
             CUDA_ASSERT(cudaEventCreate(&ctx.endEvent, cudaEventDefault));
-            ctx.size = src.Size();
             ctx.src.reserve(src.Number());
             ctx.dst.reserve(dst.Number());
             for (size_t j = 0; j < src.Number(); j++) {
                 ctx.src.push_back(src[j]);
                 ctx.dst.push_back(dst[j]);
             }
+            contexts_.push_back(std::move(ctx));
         }
-        return contexts;
+
+        CUDA_ASSERT(cudaSetDevice(contexts_[0].deviceId));
+        CUDA_ASSERT(cudaEventCreate(&totalStart_));
+        CUDA_ASSERT(cudaEventCreate(&totalEnd_));
     }
-    std::pair<size_t, std::vector<size_t>> DoCopyImpl(
-        const std::vector<CopyStreamContext>& contexts) const
+
+    void Cleanup() override
     {
-        using namespace std::chrono;
-        const auto number = contexts.size();
-        cudaEvent_t totalStart, totalEnd;
-        auto& firstCtx = contexts[0];
-        CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-        CUDA_ASSERT(cudaEventCreate(&totalStart));
-        CUDA_ASSERT(cudaEventCreate(&totalEnd));
-        CUDA_ASSERT(cudaEventRecord(totalStart, firstCtx.stream));
-        std::vector<size_t> submitCosts;
-        for (size_t i = 0; i < number; i++) {
-            auto& ctx = contexts[i];
-            CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
-            if (i != 0) { CUDA_ASSERT(cudaStreamWaitEvent(ctx.stream, totalStart)); }
-            auto tp = steady_clock::now().time_since_epoch();
-            initiator_->Copy(ctx.src.data(), ctx.dst.data(), ctx.size, ctx.src.size(), ctx.stream);
-            auto submitCost = steady_clock::now().time_since_epoch() - tp;
-            submitCosts.push_back(duration_cast<microseconds>(submitCost).count());
-            if (i != 0) {
-                CUDA_ASSERT(cudaEventRecord(ctx.endEvent, ctx.stream));
-                CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-                CUDA_ASSERT(cudaStreamWaitEvent(firstCtx.stream, ctx.endEvent));
-            }
-        }
-        CUDA_ASSERT(cudaSetDevice(firstCtx.deviceId));
-        CUDA_ASSERT(cudaEventRecord(totalEnd, firstCtx.stream));
-        CUDA_ASSERT(cudaEventSynchronize(totalEnd));
-        float copyCostMs = 0.f;
-        CUDA_ASSERT(cudaEventElapsedTime(&copyCostMs, totalStart, totalEnd));
-        CUDA_ASSERT(cudaEventDestroy(totalStart));
-        CUDA_ASSERT(cudaEventDestroy(totalEnd));
-        return {copyCostMs * 1e3, submitCosts};
-    }
-    void CleanUp(const std::vector<CopyStreamContext>& contexts) const
-    {
-        for (auto& ctx : contexts) {
+        for (auto& ctx : contexts_) {
             CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
             CUDA_ASSERT(cudaEventDestroy(ctx.endEvent));
             CUDA_ASSERT(cudaStreamDestroy(ctx.stream));
         }
+        CUDA_ASSERT(cudaSetDevice(contexts_[0].deviceId));
+        CUDA_ASSERT(cudaEventDestroy(totalStart_));
+        CUDA_ASSERT(cudaEventDestroy(totalEnd_));
+        contexts_.clear();
+    }
+
+    std::pair<size_t, size_t> DoCopyOnce() override
+    {
+        using namespace std::chrono;
+
+        CUDA_ASSERT(cudaSetDevice(contexts_[0].deviceId));
+        CUDA_ASSERT(cudaEventRecord(totalStart_, contexts_[0].stream));
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            CUDA_ASSERT(cudaSetDevice(contexts_[i].deviceId));
+            CUDA_ASSERT(cudaStreamWaitEvent(contexts_[i].stream, totalStart_));
+        }
+
+        auto submitStart = steady_clock::now();
+        for (auto& ctx : contexts_) {
+            CUDA_ASSERT(cudaSetDevice(ctx.deviceId));
+            CopyInternal(ctx);
+        }
+        auto submitCost = duration_cast<microseconds>(steady_clock::now() - submitStart).count();
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            CUDA_ASSERT(cudaSetDevice(contexts_[i].deviceId));
+            CUDA_ASSERT(cudaEventRecord(contexts_[i].endEvent, contexts_[i].stream));
+            CUDA_ASSERT(cudaSetDevice(contexts_[0].deviceId));
+            CUDA_ASSERT(cudaStreamWaitEvent(contexts_[0].stream, contexts_[i].endEvent));
+        }
+
+        CUDA_ASSERT(cudaSetDevice(contexts_[0].deviceId));
+        CUDA_ASSERT(cudaEventRecord(totalEnd_, contexts_[0].stream));
+        SynchronizeInternal(contexts_[0]);
+
+        float copyCostMs = 0.f;
+        CUDA_ASSERT(cudaEventElapsedTime(&copyCostMs, totalStart_, totalEnd_));
+        size_t copyCost = static_cast<size_t>(copyCostMs * 1000);
+
+        return {copyCost, submitCost};
+    }
+
+    virtual void CopyInternal(const CudaStreamContext& ctx) = 0;
+    virtual void SynchronizeInternal(const CudaStreamContext& ctx) = 0;
+
+public:
+    CudaCopyInstanceBase(size_t iterations, bool affinitySrc)
+        : CopyInstance(iterations, affinitySrc)
+    {
+    }
+};
+
+class H2DCECopyInstance : public CudaCopyInstanceBase {
+protected:
+    void CopyInternal(const CudaStreamContext& ctx) override
+    {
+        for (size_t i = 0; i < ctx.src.size(); i++) {
+            CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyHostToDevice,
+                                        ctx.stream));
+        }
+    }
+
+    void SynchronizeInternal(const CudaStreamContext& ctx) override
+    {
+        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
     }
 
 public:
-    using CopyInstance::CopyInstance;
-    CopyResult::Result DoCopyBatch(const std::vector<const CopyBuffer*>& srcBuffers,
-                                   const std::vector<const CopyBuffer*>& dstBuffers) const override
+    H2DCECopyInstance(size_t iterations, bool affinitySrc)
+        : CudaCopyInstanceBase(iterations, affinitySrc)
     {
-        auto contexts = Prepare(srcBuffers, dstBuffers);
-        constexpr auto warmup = 3;
-        for (auto i = 0; i < warmup; i++) { DoCopyImpl(contexts); }
-        std::vector<size_t> submitCostArray;
-        std::vector<size_t> copyCostArray;
-        for (size_t i = 0; i < iterations_; i++) {
-            auto [copyCost, submitCost] = DoCopyImpl(contexts);
-            copyCostArray.push_back(copyCost);
-            submitCostArray.insert(submitCostArray.end(),
-                                   std::make_move_iterator(submitCost.begin()),
-                                   std::make_move_iterator(submitCost.end()));
-        }
-        CleanUp(contexts);
-        return {srcBuffers.front()->Name(),
-                dstBuffers.front()->Name(),
-                initiator_->Name(),
-                srcBuffers.front()->Size(),
-                srcBuffers.front()->Number() * srcBuffers.size(),
-                std::move(submitCostArray),
-                std::move(copyCostArray)};
     }
+
+    std::string Name() const override { return "CE"; }
+};
+
+class H2DBatchCECopyInstance : public CudaCopyInstanceBase {
+protected:
+    size_t targetDevice_;
+
+    void CopyInternal(const CudaStreamContext& ctx) override
+    {
+        cudaMemcpyAttributes attr;
+        std::memset(&attr, 0, sizeof(attr));
+        attr.srcAccessOrder = cudaMemcpySrcAccessOrderAny;
+        attr.srcLocHint.type = cudaMemLocationTypeHost;
+        attr.dstLocHint.type = cudaMemLocationTypeDevice;
+        attr.dstLocHint.id = targetDevice_;
+        attr.flags = cudaMemcpyFlagPreferOverlapWithCompute;
+
+        std::vector<cudaMemcpyAttributes> attrArray{attr};
+        std::vector<size_t> attrIdxArray(ctx.src.size(), 0);
+        std::vector<size_t> sizeArray(ctx.src.size(), ctx.size);
+        size_t failureIdx = 0;
+
+        CUDA_ASSERT(cudaMemcpyBatchAsync(const_cast<void**>(ctx.dst.data()),
+                                         const_cast<void**>(ctx.src.data()), sizeArray.data(),
+                                         ctx.src.size(), attrArray.data(), attrIdxArray.data(),
+                                         attrArray.size(), &failureIdx, ctx.stream));
+    }
+
+    void SynchronizeInternal(const CudaStreamContext& ctx) override
+    {
+        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+
+public:
+    H2DBatchCECopyInstance(size_t iterations, bool affinitySrc, size_t targetDevice)
+        : CudaCopyInstanceBase(iterations, affinitySrc), targetDevice_(targetDevice)
+    {
+    }
+
+    std::string Name() const override { return "BatchCE"; }
+};
+
+class H2DSMCopyInstance : public CudaCopyInstanceBase {
+protected:
+    size_t targetDevice_;
+    size_t maxNumber_;
+    void* dSrc_;
+    void* dDst_;
+
+    void CopyInternal(const CudaStreamContext& ctx) override
+    {
+        size_t ptrSize = sizeof(void*) * ctx.src.size();
+        CUDA_ASSERT(
+            cudaMemcpyAsync(dSrc_, ctx.src.data(), ptrSize, cudaMemcpyHostToDevice, ctx.stream));
+        CUDA_ASSERT(
+            cudaMemcpyAsync(dDst_, ctx.dst.data(), ptrSize, cudaMemcpyHostToDevice, ctx.stream));
+        CUDA_ASSERT(CudaSMCopyBatchAsync(static_cast<void**>(dSrc_), static_cast<void**>(dDst_),
+                                         ctx.size, ctx.src.size(), ctx.stream));
+    }
+
+    void SynchronizeInternal(const CudaStreamContext& ctx) override
+    {
+        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+
+public:
+    H2DSMCopyInstance(size_t iterations, bool affinitySrc, size_t targetDevice, size_t maxNumber)
+        : CudaCopyInstanceBase(iterations, affinitySrc),
+          targetDevice_(targetDevice),
+          maxNumber_(maxNumber),
+          dSrc_(nullptr),
+          dDst_(nullptr)
+    {
+        CUDA_ASSERT(cudaSetDevice(targetDevice_));
+        CUDA_ASSERT(cudaMalloc(&dSrc_, sizeof(void*) * maxNumber_));
+        CUDA_ASSERT(cudaMalloc(&dDst_, sizeof(void*) * maxNumber_));
+    }
+
+    ~H2DSMCopyInstance()
+    {
+        CUDA_ASSERT(cudaSetDevice(targetDevice_));
+        if (dSrc_) CUDA_ASSERT(cudaFree(dSrc_));
+        if (dDst_) CUDA_ASSERT(cudaFree(dDst_));
+    }
+
+    std::string Name() const override { return "SM"; }
+};
+
+class D2DCECopyInstance : public CudaCopyInstanceBase {
+protected:
+    void CopyInternal(const CudaStreamContext& ctx) override
+    {
+        for (size_t i = 0; i < ctx.src.size(); i++) {
+            CUDA_ASSERT(cudaMemcpyAsync(ctx.dst[i], ctx.src[i], ctx.size, cudaMemcpyDeviceToDevice,
+                                        ctx.stream));
+        }
+    }
+
+    void SynchronizeInternal(const CudaStreamContext& ctx) override
+    {
+        CUDA_ASSERT(cudaStreamSynchronize(ctx.stream));
+    }
+
+public:
+    D2DCECopyInstance(size_t iterations, bool affinitySrc)
+        : CudaCopyInstanceBase(iterations, affinitySrc)
+    {
+    }
+
+    std::string Name() const override { return "CE"; }
 };
 
 #endif  // COPY_INSTANCE_CUDA_H

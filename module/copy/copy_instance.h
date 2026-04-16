@@ -24,30 +24,69 @@
 #ifndef COPY_INSTANCE_H
 #define COPY_INSTANCE_H
 
+#include <chrono>
+#include <utility>
+#include <vector>
 #include "copy_buffer.h"
-#include "copy_initiator.h"
 #include "copy_result.h"
 
 class CopyInstance {
 protected:
-    const CopyInitiator* initiator_;
     size_t iterations_;
     bool affinitySrc_;
 
+    virtual size_t AffinityDeviceId(const CopyBuffer& src, const CopyBuffer& dst) const
+    {
+        return (affinitySrc_ ? src : dst).Device();
+    }
+
+    virtual void Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
+                         const std::vector<const CopyBuffer*>& dstBuffers) = 0;
+
+    virtual std::pair<size_t, size_t> DoCopyOnce() = 0;
+
+    virtual void Cleanup() = 0;
+
 public:
-    CopyInstance(const CopyInitiator* initiator, size_t iterations, bool affinitySrc)
-        : initiator_(initiator), iterations_(iterations), affinitySrc_(affinitySrc)
+    CopyInstance(size_t iterations, bool affinitySrc)
+        : iterations_(iterations), affinitySrc_(affinitySrc)
     {
     }
+
     virtual ~CopyInstance() = default;
-    virtual CopyResult::Result DoCopyBatch(
-        const std::vector<const CopyBuffer*>& srcBuffers,
-        const std::vector<const CopyBuffer*>& dstBuffers) const = 0;
-    CopyResult::Result DoCopy(const CopyBuffer* srcBuffer, const CopyBuffer* dstBuffer) const
+
+    virtual std::string Name() const = 0;
+
+    CopyResult::Result DoCopyBatch(const std::vector<const CopyBuffer*>& srcBuffers,
+                                   const std::vector<const CopyBuffer*>& dstBuffers)
     {
-        std::vector<const CopyBuffer*> srcBuffers{srcBuffer};
-        std::vector<const CopyBuffer*> dstBuffers{dstBuffer};
-        return DoCopyBatch(srcBuffers, dstBuffers);
+        Prepare(srcBuffers, dstBuffers);
+
+        constexpr int warmup = 3;
+        for (int i = 0; i < warmup; i++) { DoCopyOnce(); }
+
+        std::vector<size_t> submitCostArray;
+        std::vector<size_t> copyCostArray;
+        for (size_t i = 0; i < iterations_; i++) {
+            auto [copyCost, submitCost] = DoCopyOnce();
+            copyCostArray.push_back(copyCost);
+            submitCostArray.push_back(submitCost);
+        }
+
+        Cleanup();
+
+        return {srcBuffers.front()->Name(),
+                dstBuffers.front()->Name(),
+                Name(),
+                srcBuffers.front()->Size(),
+                srcBuffers.front()->Number() * srcBuffers.size(),
+                std::move(submitCostArray),
+                std::move(copyCostArray)};
+    }
+
+    CopyResult::Result DoCopy(const CopyBuffer* srcBuffer, const CopyBuffer* dstBuffer)
+    {
+        return DoCopyBatch({srcBuffer}, {dstBuffer});
     }
 };
 

@@ -5,6 +5,9 @@ project(dev-sandbox VERSION 1.0.0 LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(DetectRuntime)
 detect_runtime_backend()
+if (CUDA_FOUND)
+    enable_language(CUDA)
+endif()
 
 # C++ standard
 set(CMAKE_CXX_STANDARD 17)

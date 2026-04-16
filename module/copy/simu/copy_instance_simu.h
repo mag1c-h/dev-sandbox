@@ -25,27 +25,37 @@
 #define COPY_INSTANCE_SIMU_H
 
 #include <chrono>
+#include <cstring>
+#include <utility>
+#include <vector>
+#include "copy_buffer.h"
 #include "copy_instance.h"
 #include "error_handle.h"
 
-class SimuCopyInstance : public CopyInstance {
-    struct CopyStreamContext {
-        size_t size;
-        std::vector<void*> src;
-        std::vector<void*> dst;
-    };
+struct SimuStreamContext {
+    size_t deviceId;
+    size_t size;
+    std::vector<void*> src;
+    std::vector<void*> dst;
+};
 
-    static std::vector<CopyStreamContext> Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
-                                                  const std::vector<const CopyBuffer*>& dstBuffers)
+class MemcpyCopyInstance : public CopyInstance {
+protected:
+    std::vector<SimuStreamContext> contexts_;
+
+    void Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
+                 const std::vector<const CopyBuffer*>& dstBuffers) override
     {
+        contexts_.clear();
         const auto bufferNumber = srcBuffers.size();
-        std::vector<CopyStreamContext> contexts(bufferNumber);
         for (size_t i = 0; i < bufferNumber; i++) {
-            auto& ctx = contexts[i];
             auto& src = *srcBuffers[i];
             auto& dst = *dstBuffers[i];
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
+
+            SimuStreamContext ctx;
+            ctx.deviceId = AffinityDeviceId(src, dst);
             ctx.size = src.Size();
             ctx.src.reserve(src.Number());
             ctx.dst.reserve(dst.Number());
@@ -53,53 +63,31 @@ class SimuCopyInstance : public CopyInstance {
                 ctx.src.push_back(src[j]);
                 ctx.dst.push_back(dst[j]);
             }
+            contexts_.push_back(std::move(ctx));
         }
-        return contexts;
     }
 
-    std::pair<size_t, std::vector<size_t>> DoCopyImpl(
-        const std::vector<CopyStreamContext>& contexts) const
+    void Cleanup() override { contexts_.clear(); }
+
+    std::pair<size_t, size_t> DoCopyOnce() override
     {
         using namespace std::chrono;
-        const auto number = contexts.size();
-        auto tpStart = steady_clock::now().time_since_epoch();
-        std::vector<size_t> submitCosts;
-        for (size_t i = 0; i < number; i++) {
-            auto& ctx = contexts[i];
-            auto tp = steady_clock::now().time_since_epoch();
-            initiator_->Copy(ctx.src.data(), ctx.dst.data(), ctx.size, ctx.src.size(), nullptr);
-            auto submitCost = steady_clock::now().time_since_epoch() - tp;
-            submitCosts.push_back(duration_cast<microseconds>(submitCost).count());
+        auto submitStart = steady_clock::now();
+        for (const auto& ctx : contexts_) {
+            for (size_t i = 0; i < ctx.src.size(); i++) {
+                std::memcpy(ctx.dst[i], ctx.src[i], ctx.size);
+            }
         }
-        auto copyCost = steady_clock::now().time_since_epoch() - tpStart;
-        return {duration_cast<microseconds>(copyCost).count(), submitCosts};
+        auto copyCost = duration_cast<microseconds>(steady_clock::now() - submitStart).count();
+        return {copyCost, copyCost};
     }
 
 public:
-    using CopyInstance::CopyInstance;
-    CopyResult::Result DoCopyBatch(const std::vector<const CopyBuffer*>& srcBuffers,
-                                   const std::vector<const CopyBuffer*>& dstBuffers) const override
+    MemcpyCopyInstance(size_t iterations, bool affinitySrc) : CopyInstance(iterations, affinitySrc)
     {
-        auto contexts = Prepare(srcBuffers, dstBuffers);
-        constexpr auto warmup = 3;
-        for (auto i = 0; i < warmup; i++) { DoCopyImpl(contexts); }
-        std::vector<size_t> submitCostArray;
-        std::vector<size_t> copyCostArray;
-        for (size_t i = 0; i < iterations_; i++) {
-            auto [copyCost, submitCost] = DoCopyImpl(contexts);
-            copyCostArray.push_back(copyCost);
-            submitCostArray.insert(submitCostArray.end(),
-                                   std::make_move_iterator(submitCost.begin()),
-                                   std::make_move_iterator(submitCost.end()));
-        }
-        return {srcBuffers.front()->Name(),
-                dstBuffers.front()->Name(),
-                initiator_->Name(),
-                srcBuffers.front()->Size(),
-                srcBuffers.front()->Number() * srcBuffers.size(),
-                std::move(submitCostArray),
-                std::move(copyCostArray)};
     }
+
+    std::string Name() const override { return "memcpy"; }
 };
 
 #endif  // COPY_INSTANCE_SIMU_H

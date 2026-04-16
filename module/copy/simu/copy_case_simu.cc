@@ -23,18 +23,16 @@
  * */
 #include "copy_buffer_simu.h"
 #include "copy_case.h"
-#include "copy_initiator_simu.h"
 #include "copy_instance_simu.h"
 
 DEFINE_COPY_CASE(Host2AnonymousMemcpyCase, "host_to_anonymous_memcpy",
                  "memcpy from host to anonymous one by one", ctx)
 {
-    MemcpyCopyInitiator initiator;
-    SimuCopyInstance instance{&initiator, ctx.iter, false};
     CopyResult result;
     for (size_t device = 0; device < ctx.nDevice; device++) {
         HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
         AnonymousCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        MemcpyCopyInstance instance{ctx.iter, false};
         result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
@@ -43,8 +41,7 @@ DEFINE_COPY_CASE(Host2AnonymousMemcpyCase, "host_to_anonymous_memcpy",
 DEFINE_COPY_CASE(Shm2AllHostMemcpyCase, "shm_to_all_host_memcpy",
                  "memcpy from shm to all host at one time", ctx)
 {
-    MemcpyCopyInitiator initiator;
-    SimuCopyInstance instance{&initiator, ctx.iter, true};
+    MemcpyCopyInstance instance{ctx.iter, true};
     CopyResult result;
     std::string shmKey = Key() + ".shm";
     const char* shmFile = shmKey.c_str();

@@ -25,174 +25,316 @@
 #define COPY_INSTANCE_ASCEND_H
 
 #include <chrono>
+#include <cstring>
+#include <utility>
+#include <vector>
+#include "copy_buffer.h"
 #include "copy_instance.h"
 #include "error_handle_ascend.h"
 
-class AscendCopyInstance : public CopyInstance {
-protected:
-    struct CopyStreamContext {
-        size_t deviceId;
-        aclrtStream stream;
-        aclrtEvent endEvent;
-        size_t size;
-        std::vector<void*> src;
-        std::vector<void*> dst;
-    };
+struct AscendStreamContext {
+    size_t deviceId;
+    aclrtStream stream;
+    aclrtEvent endEvent;
+    size_t size;
+    std::vector<void*> src;
+    std::vector<void*> dst;
+};
 
-    virtual size_t AffinityDeviceId(const CopyBuffer& src, const CopyBuffer& dst) const
+class AscendCopyInstanceBase : public CopyInstance {
+protected:
+    std::vector<AscendStreamContext> contexts_;
+    aclrtEvent totalStart_;
+    aclrtEvent totalEnd_;
+
+    void Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
+                 const std::vector<const CopyBuffer*>& dstBuffers) override
     {
-        return (affinitySrc_ ? src : dst).Device();
-    }
-    virtual std::vector<CopyStreamContext> Prepare(
-        const std::vector<const CopyBuffer*>& srcBuffers,
-        const std::vector<const CopyBuffer*>& dstBuffers) const
-    {
+        contexts_.clear();
         const auto bufferNumber = srcBuffers.size();
-        std::vector<CopyStreamContext> contexts(bufferNumber);
         for (size_t i = 0; i < bufferNumber; i++) {
-            auto& ctx = contexts[i];
             auto& src = *srcBuffers[i];
             auto& dst = *dstBuffers[i];
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
+
+            AscendStreamContext ctx;
             ctx.deviceId = AffinityDeviceId(src, dst);
+            ctx.size = src.Size();
             ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
             ASCEND_ASSERT(aclrtCreateStream(&ctx.stream));
             ASCEND_ASSERT(aclrtCreateEvent(&ctx.endEvent));
-            ctx.size = src.Size();
             ctx.src.reserve(src.Number());
             ctx.dst.reserve(dst.Number());
             for (size_t j = 0; j < src.Number(); j++) {
                 ctx.src.push_back(src[j]);
                 ctx.dst.push_back(dst[j]);
             }
+            contexts_.push_back(std::move(ctx));
         }
-        return contexts;
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalStart_));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalEnd_));
     }
-    virtual std::pair<size_t, std::vector<size_t>> DoCopyImpl(
-        const std::vector<CopyStreamContext>& contexts) const
+
+    void Cleanup() override
     {
-        using namespace std::chrono;
-        const auto number = contexts.size();
-        aclrtEvent totalStart, totalEnd;
-        auto& firstCtx = contexts[0];
-        ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
-        ASCEND_ASSERT(aclrtCreateEvent(&totalStart));
-        ASCEND_ASSERT(aclrtCreateEvent(&totalEnd));
-        ASCEND_ASSERT(aclrtRecordEvent(totalStart, firstCtx.stream));
-        std::vector<size_t> submitCosts;
-        for (size_t i = 0; i < number; i++) {
-            auto& ctx = contexts[i];
-            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
-            if (i != 0) { ASCEND_ASSERT(aclrtStreamWaitEvent(ctx.stream, totalStart)); }
-            auto tp = steady_clock::now().time_since_epoch();
-            initiator_->Copy(ctx.src.data(), ctx.dst.data(), ctx.size, ctx.src.size(), ctx.stream);
-            auto submitCost = steady_clock::now().time_since_epoch() - tp;
-            submitCosts.push_back(duration_cast<microseconds>(submitCost).count());
-            if (i != 0) {
-                ASCEND_ASSERT(aclrtRecordEvent(ctx.endEvent, ctx.stream));
-                ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
-                ASCEND_ASSERT(aclrtStreamWaitEvent(firstCtx.stream, ctx.endEvent));
-            }
-        }
-        ASCEND_ASSERT(aclrtSetDevice(firstCtx.deviceId));
-        ASCEND_ASSERT(aclrtRecordEvent(totalEnd, firstCtx.stream));
-        ASCEND_ASSERT(aclrtSynchronizeEvent(totalEnd));
-        float copyCostMs = 0.f;
-        ASCEND_ASSERT(aclrtEventElapsedTime(&copyCostMs, totalStart, totalEnd));
-        ASCEND_ASSERT(aclrtDestroyEvent(totalStart));
-        ASCEND_ASSERT(aclrtDestroyEvent(totalEnd));
-        return {copyCostMs * 1e3, submitCosts};
-    }
-    virtual void CleanUp(const std::vector<CopyStreamContext>& contexts) const
-    {
-        for (auto& ctx : contexts) {
+        for (auto& ctx : contexts_) {
             ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
             ASCEND_ASSERT(aclrtDestroyEvent(ctx.endEvent));
             ASCEND_ASSERT(aclrtDestroyStream(ctx.stream));
         }
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalStart_));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalEnd_));
+        contexts_.clear();
     }
 
-public:
-    AscendCopyInstance(const CopyInitiator* initiator, size_t iterations, bool affinitySrc)
-        : CopyInstance(initiator, iterations, affinitySrc)
+    std::pair<size_t, size_t> DoCopyOnce() override
     {
-    }
-    CopyResult::Result DoCopyBatch(const std::vector<const CopyBuffer*>& srcBuffers,
-                                   const std::vector<const CopyBuffer*>& dstBuffers) const override
-    {
-        auto contexts = Prepare(srcBuffers, dstBuffers);
-        constexpr auto warmup = 3;
-        for (auto i = 0; i < warmup; i++) { DoCopyImpl(contexts); }
-        std::vector<size_t> submitCostArray;
-        std::vector<size_t> copyCostArray;
-        for (size_t i = 0; i < iterations_; i++) {
-            auto [copyCost, submitCost] = DoCopyImpl(contexts);
-            copyCostArray.push_back(copyCost);
-            submitCostArray.insert(submitCostArray.end(),
-                                   std::make_move_iterator(submitCost.begin()),
-                                   std::make_move_iterator(submitCost.end()));
+        using namespace std::chrono;
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtRecordEvent(totalStart_, contexts_[0].stream));
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[i].deviceId));
+            ASCEND_ASSERT(aclrtStreamWaitEvent(contexts_[i].stream, totalStart_));
         }
-        CleanUp(contexts);
-        return {srcBuffers.front()->Name(),
-                dstBuffers.front()->Name(),
-                initiator_->Name(),
-                srcBuffers.front()->Size(),
-                srcBuffers.front()->Number() * srcBuffers.size(),
-                std::move(submitCostArray),
-                std::move(copyCostArray)};
+
+        auto submitStart = steady_clock::now();
+        for (auto& ctx : contexts_) {
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            CopyInternal(ctx);
+        }
+        auto submitCost = duration_cast<microseconds>(steady_clock::now() - submitStart).count();
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[i].deviceId));
+            ASCEND_ASSERT(aclrtRecordEvent(contexts_[i].endEvent, contexts_[i].stream));
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+            ASCEND_ASSERT(aclrtStreamWaitEvent(contexts_[0].stream, contexts_[i].endEvent));
+        }
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtRecordEvent(totalEnd_, contexts_[0].stream));
+        SynchronizeInternal(contexts_[0]);
+
+        float copyCostMs = 0.f;
+        ASCEND_ASSERT(aclrtEventElapsedTime(&copyCostMs, totalStart_, totalEnd_));
+        size_t copyCost = static_cast<size_t>(copyCostMs * 1000);
+
+        return {copyCost, submitCost};
+    }
+
+    virtual void CopyInternal(const AscendStreamContext& ctx) = 0;
+    virtual void SynchronizeInternal(const AscendStreamContext& ctx) = 0;
+
+public:
+    AscendCopyInstanceBase(size_t iterations, bool affinitySrc)
+        : CopyInstance(iterations, affinitySrc)
+    {
     }
 };
 
-class AscendMultiStreamCopyInstance : public AscendCopyInstance {
+class H2DCECopyInstance : public AscendCopyInstanceBase {
+protected:
+    void CopyInternal(const AscendStreamContext& ctx) override
+    {
+        for (size_t i = 0; i < ctx.src.size(); i++) {
+            ASCEND_ASSERT(aclrtMemcpyAsync(ctx.dst[i], ctx.size, ctx.src[i], ctx.size,
+                                           ACL_MEMCPY_HOST_TO_DEVICE, ctx.stream));
+        }
+    }
+
+    void SynchronizeInternal(const AscendStreamContext& ctx) override
+    {
+        ASCEND_ASSERT(aclrtSynchronizeStream(ctx.stream));
+    }
+
+public:
+    H2DCECopyInstance(size_t iterations, bool affinitySrc)
+        : AscendCopyInstanceBase(iterations, affinitySrc)
+    {
+    }
+
+    std::string Name() const override { return "CE"; }
+};
+
+class H2DBatchCECopyInstance : public AscendCopyInstanceBase {
+protected:
+    size_t targetDevice_;
+
+    void CopyInternal(const AscendStreamContext& ctx) override
+    {
+        aclrtMemcpyBatchAttr attr;
+        std::memset(&attr, 0, sizeof(attr));
+        attr.srcLoc.type = ACL_MEM_LOCATION_TYPE_HOST;
+        attr.dstLoc.type = ACL_MEM_LOCATION_TYPE_DEVICE;
+        attr.dstLoc.id = targetDevice_;
+
+        std::vector<aclrtMemcpyBatchAttr> attrArray{attr};
+        std::vector<size_t> attrIdxArray(ctx.src.size(), 0);
+        std::vector<size_t> sizeArray(ctx.src.size(), ctx.size);
+        size_t failureIdx = 0;
+
+        ASCEND_ASSERT(aclrtMemcpyBatchAsync(const_cast<void**>(ctx.dst.data()), sizeArray.data(),
+                                            const_cast<void**>(ctx.src.data()), sizeArray.data(),
+                                            ctx.src.size(), attrArray.data(), attrIdxArray.data(),
+                                            attrArray.size(), &failureIdx, ctx.stream));
+    }
+
+    void SynchronizeInternal(const AscendStreamContext& ctx) override
+    {
+        ASCEND_ASSERT(aclrtSynchronizeStream(ctx.stream));
+    }
+
+public:
+    H2DBatchCECopyInstance(size_t iterations, bool affinitySrc, size_t targetDevice)
+        : AscendCopyInstanceBase(iterations, affinitySrc), targetDevice_(targetDevice)
+    {
+    }
+
+    std::string Name() const override { return "BatchCE"; }
+};
+
+class D2DCECopyInstance : public AscendCopyInstanceBase {
+protected:
+    void CopyInternal(const AscendStreamContext& ctx) override
+    {
+        for (size_t i = 0; i < ctx.src.size(); i++) {
+            ASCEND_ASSERT(aclrtMemcpyAsync(ctx.dst[i], ctx.size, ctx.src[i], ctx.size,
+                                           ACL_MEMCPY_DEVICE_TO_DEVICE, ctx.stream));
+        }
+    }
+
+    void SynchronizeInternal(const AscendStreamContext& ctx) override
+    {
+        ASCEND_ASSERT(aclrtSynchronizeStream(ctx.stream));
+    }
+
+public:
+    D2DCECopyInstance(size_t iterations, bool affinitySrc)
+        : AscendCopyInstanceBase(iterations, affinitySrc)
+    {
+    }
+
+    std::string Name() const override { return "CE"; }
+};
+
+class H2DCEMultiStreamCopyInstance : public CopyInstance {
+protected:
+    std::vector<AscendStreamContext> contexts_;
+    aclrtEvent totalStart_;
+    aclrtEvent totalEnd_;
     size_t streamCount_;
 
-protected:
-    std::vector<CopyStreamContext> Prepare(
-        const std::vector<const CopyBuffer*>& srcBuffers,
-        const std::vector<const CopyBuffer*>& dstBuffers) const override
+    void Prepare(const std::vector<const CopyBuffer*>& srcBuffers,
+                 const std::vector<const CopyBuffer*>& dstBuffers) override
     {
+        contexts_.clear();
         const auto bufferNumber = srcBuffers.size();
-        std::vector<CopyStreamContext> contexts;
-        contexts.reserve(bufferNumber * streamCount_);
+        contexts_.reserve(bufferNumber * streamCount_);
+
         for (size_t i = 0; i < bufferNumber; i++) {
             auto& src = *srcBuffers[i];
             auto& dst = *dstBuffers[i];
             ASSERT(src.Number() == dst.Number());
             ASSERT(src.Size() == dst.Size());
+
             size_t bufferCount = src.Number();
             size_t base = bufferCount / streamCount_;
             size_t remainder = bufferCount % streamCount_;
             size_t deviceId = AffinityDeviceId(src, dst);
             ASCEND_ASSERT(aclrtSetDevice(deviceId));
+
             size_t offset = 0;
             for (size_t s = 0; s < streamCount_; s++) {
                 size_t count = base + (s < remainder ? 1 : 0);
                 if (count == 0) continue;
-                CopyStreamContext ctx;
+
+                AscendStreamContext ctx;
                 ctx.deviceId = deviceId;
+                ctx.size = src.Size();
                 ASCEND_ASSERT(aclrtCreateStream(&ctx.stream));
                 ASCEND_ASSERT(aclrtCreateEvent(&ctx.endEvent));
-                ctx.size = src.Size();
                 ctx.src.reserve(count);
                 ctx.dst.reserve(count);
                 for (size_t j = 0; j < count; j++) {
                     ctx.src.push_back(src[offset + j]);
                     ctx.dst.push_back(dst[offset + j]);
                 }
-                contexts.push_back(std::move(ctx));
+                contexts_.push_back(std::move(ctx));
                 offset += count;
             }
         }
-        return contexts;
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalStart_));
+        ASCEND_ASSERT(aclrtCreateEvent(&totalEnd_));
+    }
+
+    void Cleanup() override
+    {
+        for (auto& ctx : contexts_) {
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            ASCEND_ASSERT(aclrtDestroyEvent(ctx.endEvent));
+            ASCEND_ASSERT(aclrtDestroyStream(ctx.stream));
+        }
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalStart_));
+        ASCEND_ASSERT(aclrtDestroyEvent(totalEnd_));
+        contexts_.clear();
+    }
+
+    std::pair<size_t, size_t> DoCopyOnce() override
+    {
+        using namespace std::chrono;
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtRecordEvent(totalStart_, contexts_[0].stream));
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[i].deviceId));
+            ASCEND_ASSERT(aclrtStreamWaitEvent(contexts_[i].stream, totalStart_));
+        }
+
+        auto submitStart = steady_clock::now();
+        for (auto& ctx : contexts_) {
+            ASCEND_ASSERT(aclrtSetDevice(ctx.deviceId));
+            for (size_t i = 0; i < ctx.src.size(); i++) {
+                ASCEND_ASSERT(aclrtMemcpyAsync(ctx.dst[i], ctx.size, ctx.src[i], ctx.size,
+                                               ACL_MEMCPY_HOST_TO_DEVICE, ctx.stream));
+            }
+        }
+        auto submitCost = duration_cast<microseconds>(steady_clock::now() - submitStart).count();
+
+        for (size_t i = 1; i < contexts_.size(); i++) {
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[i].deviceId));
+            ASCEND_ASSERT(aclrtRecordEvent(contexts_[i].endEvent, contexts_[i].stream));
+            ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+            ASCEND_ASSERT(aclrtStreamWaitEvent(contexts_[0].stream, contexts_[i].endEvent));
+        }
+
+        ASCEND_ASSERT(aclrtSetDevice(contexts_[0].deviceId));
+        ASCEND_ASSERT(aclrtRecordEvent(totalEnd_, contexts_[0].stream));
+        ASCEND_ASSERT(aclrtSynchronizeStream(contexts_[0].stream));
+
+        float copyCostMs = 0.f;
+        ASCEND_ASSERT(aclrtEventElapsedTime(&copyCostMs, totalStart_, totalEnd_));
+        size_t copyCost = static_cast<size_t>(copyCostMs * 1000);
+
+        return {copyCost, submitCost};
     }
 
 public:
-    AscendMultiStreamCopyInstance(const CopyInitiator* initiator, size_t iterations,
-                                  bool affinitySrc, size_t streamCount)
-        : AscendCopyInstance(initiator, iterations, affinitySrc), streamCount_(streamCount)
+    H2DCEMultiStreamCopyInstance(size_t iterations, bool affinitySrc, size_t streamCount)
+        : CopyInstance(iterations, affinitySrc), streamCount_(streamCount)
     {
     }
+
+    std::string Name() const override { return "CE"; }
 };
 
 #endif  // COPY_INSTANCE_ASCEND_H
