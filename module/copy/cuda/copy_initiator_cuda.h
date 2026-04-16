@@ -26,6 +26,7 @@
 
 #include "copy_initiator.h"
 #include "error_handle_cuda.h"
+#include "gdr_context_cuda.h"
 
 extern cudaError_t CudaSMCopyBatchAsync(void* src[], void* dst[], size_t size, size_t number,
                                         cudaStream_t stream);
@@ -110,6 +111,62 @@ public:
         CUDA_ASSERT(cudaMemcpyAsync(dDst_, dst, ptrSize, cudaMemcpyHostToDevice, stream));
         CUDA_ASSERT(CudaSMCopyBatchAsync(static_cast<void**>(dSrc_), static_cast<void**>(dDst_),
                                          size, number, stream));
+    }
+};
+
+class GdrH2DInitiator : public CopyInitiator {
+    size_t device_;
+    size_t number_;
+    std::unique_ptr<GdrContext> gdr_ctx_;
+    std::vector<GdrContext::HostMapping*> src_mappings_;
+    std::vector<GdrContext::GpuMapping*> dst_mappings_;
+    bool initialized_{false};
+
+public:
+    GdrH2DInitiator(size_t device, size_t number)
+        : CopyInitiator{}, device_{device}, number_{number}
+    {
+        gdr_ctx_ = std::make_unique<GdrContext>(device);
+        src_mappings_.resize(number, nullptr);
+        dst_mappings_.resize(number, nullptr);
+    }
+    ~GdrH2DInitiator() override
+    {
+        for (auto* m : src_mappings_) {
+            if (m) gdr_ctx_->DeregisterHostMemory(m);
+        }
+        for (auto* m : dst_mappings_) {
+            if (m) gdr_ctx_->UnmapGpuMemory(m);
+        }
+    }
+    std::string Name() const override { return "GDR"; }
+
+    void Initialize(void* const* src, void* const* dst, size_t size, size_t number)
+    {
+        if (initialized_) return;
+        for (size_t i = 0; i < number; ++i) {
+            src_mappings_[i] = gdr_ctx_->RegisterHostMemory(src[i], size);
+            dst_mappings_[i] = gdr_ctx_->MapGpuMemory(dst[i], size);
+        }
+        initialized_ = true;
+    }
+
+    void Copy(void* const* src, void* const* dst, size_t size, size_t number,
+              void* args) const override
+    {
+        if (!initialized_) {
+            const_cast<GdrH2DInitiator*>(this)->Initialize(src, dst, size, number);
+        }
+
+        std::vector<GdrContext::HostMapping*> srcs(number);
+        std::vector<GdrContext::GpuMapping*> dsts(number);
+        for (size_t i = 0; i < number; ++i) {
+            srcs[i] = src_mappings_[i];
+            dsts[i] = dst_mappings_[i];
+        }
+
+        gdr_ctx_->PostRdmaWriteBatch(srcs.data(), dsts.data(), size, number);
+        gdr_ctx_->WaitCompletion(number);
     }
 };
 

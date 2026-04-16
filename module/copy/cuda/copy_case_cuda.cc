@@ -171,3 +171,17 @@ DEFINE_COPY_CASE(Anonymous2DeviceSMCase, "anonymous_to_device_sm",
     }
     result.Show("[[ " + Key() + " ]] " + Brief());
 }
+
+DEFINE_COPY_CASE(Host2DeviceGdrCase, "host_to_device_gdr",
+                 "host to device via GPUDirect RDMA (gdrcopy + ibverbs)", ctx)
+{
+    CopyResult result;
+    for (size_t device = 0; device < ctx.nDevice; device++) {
+        HostCopyBuffer srcBuffer{device, ctx.size, ctx.num};
+        DeviceCopyBuffer dstBuffer{device, ctx.size, ctx.num};
+        GdrH2DInitiator initiator{device, ctx.num};
+        CudaCopyInstance instance{&initiator, ctx.iter, false};
+        result.Push(instance.DoCopy(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[[ " + Key() + " ]] " + Brief());
+}
