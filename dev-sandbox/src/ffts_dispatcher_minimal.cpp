@@ -7,6 +7,10 @@
 extern int rtGeneralCtrl(uintptr_t* input, size_t inputSize, uint32_t type);
 #endif
 
+#ifndef USE_NPU
+constexpr uint32_t RT_CTX_SUCCESSOR_NUM = 26;
+#endif
+
 FftsDispatcherMinimal::FftsDispatcherMinimal() {}
 
 FftsDispatcherMinimal::~FftsDispatcherMinimal() {}
@@ -67,6 +71,27 @@ int FftsDispatcherMinimal::MemcpyAsync(void* dst, const void* src, uint64_t size
     
     *taskId = currentCtx_->refreshIndex;
     currentCtx_->refreshIndex++;
+    return 0;
+}
+
+int FftsDispatcherMinimal::AddTaskDependency(uint32_t predecessorId, uint32_t successorId) {
+    if (currentCtx_ == nullptr) return -1;
+    if (predecessorId >= currentCtx_->contexts.size() || successorId >= currentCtx_->contexts.size()) {
+        return -1;
+    }
+    
+#ifdef USE_NPU
+    rtFftsPlusComCtx_t& predCtx = currentCtx_->contexts[predecessorId];
+    if (predCtx.successorNum < RT_CTX_SUCCESSOR_NUM) {
+        predCtx.successorList[predCtx.successorNum] = successorId;
+        predCtx.successorNum++;
+    }
+    
+    rtFftsPlusComCtx_t& succCtx = currentCtx_->contexts[successorId];
+    succCtx.predCntInit++;
+    succCtx.predCnt++;
+#endif
+    
     return 0;
 }
 

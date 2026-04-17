@@ -27,6 +27,7 @@ public:
     int CreateFftsCtxs(int amount);
     int SetFftsCtx(int index);
     int MemcpyAsync(void* dst, const void* src, uint64_t size, uint32_t* taskId);
+    int AddTaskDependency(uint32_t predecessorId, uint32_t successorId);
     int LaunchFftsTask(aclrtStream stream, uint16_t readyCount, int ctxIndex);
     int ReuseCtx(int index);
 

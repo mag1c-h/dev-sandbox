@@ -70,8 +70,6 @@ int ThreeStageH2D(
         return aclRet;
     }
     
-    dispatcher->ReuseCtx(0);
-    
     const size_t MAX_PARALLEL = 8;
     std::vector<uint32_t> taskIds(count);
     std::vector<int32_t> lastTaskId(MAX_PARALLEL, -1);
@@ -88,6 +86,12 @@ int ThreeStageH2D(
             aclrtFree(devicePinBuffer);
             return ret;
         }
+        
+        size_t idx = i % MAX_PARALLEL;
+        if (lastTaskId[idx] >= 0) {
+            dispatcher->AddTaskDependency(lastTaskId[idx], taskIds[i]);
+        }
+        lastTaskId[idx] = taskIds[i];
     }
     
     uint16_t readyCount = (count < MAX_PARALLEL) ? count : MAX_PARALLEL;
