@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "ffts_dispatcher_minimal.h"
+#include "three_stage_h2d_huge.h"
 
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);
 extern int AsyncPipelineH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream);
@@ -239,6 +240,84 @@ int TestThreeStage() {
     return success ? 0 : -1;
 }
 
+int TestThreeStageHuge() {
+    printf("\n=== Testing Three Stage H2D (HugeFFTS) ===\n");
+    
+    const size_t objectCount = 3;
+    const size_t blobsPerObject = 3;
+    const size_t blobSize = 64 * 1024;
+    const size_t objectSize = blobSize * blobsPerObject;
+    
+    std::vector<void*> hostPins(objectCount);
+    for (size_t i = 0; i < objectCount; i++) {
+        aclError aclRet = aclrtMallocHost(&hostPins[i], objectSize);
+        if (aclRet != ACL_SUCCESS) return -1;
+        std::memset(hostPins[i], 'H' + i, objectSize);
+    }
+    
+    std::vector<void*> devPtrs(objectCount * blobsPerObject);
+    std::vector<size_t> blobSizes(objectCount * blobsPerObject, blobSize);
+    for (size_t i = 0; i < objectCount * blobsPerObject; i++) {
+        aclError aclRet = aclrtMalloc(&devPtrs[i], blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        if (aclRet != ACL_SUCCESS) return -1;
+    }
+    
+    std::vector<size_t> objectSizes(objectCount, objectSize);
+    std::vector<size_t> blobCounts(objectCount, blobsPerObject);
+    std::vector<size_t> blobOffsets(objectCount);
+    for (size_t i = 0; i < objectCount; i++) {
+        blobOffsets[i] = i * blobsPerObject;
+    }
+    
+    aclrtStream h2dStream, fftsStream;
+    aclrtCreateStream(&h2dStream);
+    aclrtCreateStream(&fftsStream);
+    
+    FftsDispatcherMinimal dispatcher;
+    dispatcher.Init();
+    dispatcher.CreateFftsCtxs(1);
+    dispatcher.SetFftsCtx(0);
+    
+    int ret = ThreeStageH2D_Huge(
+        hostPins.data(), devPtrs.data(),
+        objectSizes.data(), blobSizes.data(),
+        blobCounts.data(), blobOffsets.data(),
+        objectCount, 0, h2dStream, fftsStream, &dispatcher);
+    
+    bool success = (ret == 0);
+    if (success) {
+        for (size_t objIdx = 0; objIdx < objectCount; objIdx++) {
+            char expected = 'H' + objIdx;
+            for (size_t blobIdx = 0; blobIdx < blobsPerObject; blobIdx++) {
+                size_t globalIdx = blobOffsets[objIdx] + blobIdx;
+                std::vector<char> verify(blobSize);
+                aclrtMemcpy(verify.data(), blobSize, devPtrs[globalIdx], blobSize, ACL_MEMCPY_DEVICE_TO_HOST);
+                if (verify[0] != expected) {
+                    success = false;
+                    break;
+                }
+            }
+            if (!success) break;
+        }
+    }
+    
+    PrintResult("Three stage H2D (HugeFFTS)", success);
+    if (success) {
+        printf("  🎉 Double-stream pipeline + FFTS scatter works!\n");
+    }
+    
+    aclrtDestroyStream(h2dStream);
+    aclrtDestroyStream(fftsStream);
+    for (size_t i = 0; i < objectCount; i++) {
+        aclrtFreeHost(hostPins[i]);
+    }
+    for (size_t i = 0; i < objectCount * blobsPerObject; i++) {
+        aclrtFree(devPtrs[i]);
+    }
+    
+    return success ? 0 : -1;
+}
+
 int main() {
     printf("========================================\n");
     printf("  Feasibility Test: Discrete→Discrete H2D\n");
@@ -267,6 +346,7 @@ int main() {
     result |= TestAsyncPipeline();
     result |= TestFftsH2D();
     result |= TestThreeStage();
+    result |= TestThreeStageHuge();
     
     printf("\n========================================\n");
     printf("  Summary:\n");

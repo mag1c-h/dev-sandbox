@@ -6,6 +6,7 @@
 #include <chrono>
 
 #include "ffts_dispatcher_minimal.h"
+#include "three_stage_h2d_huge.h"
 
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);
 extern int AsyncPipelineH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream);
@@ -159,6 +160,67 @@ void BenchmarkThreeStage(const TestConfig& config) {
     }
 }
 
+void BenchmarkThreeStageHuge(const TestConfig& config) {
+    const size_t blobsPerObject = 3;
+    size_t objectCount = (config.blobCount / blobsPerObject);
+    if (objectCount == 0) objectCount = 1;
+    size_t totalBlobs = objectCount * blobsPerObject;
+    size_t objectSize = config.blobSize * blobsPerObject;
+    
+    std::vector<void*> hostPins(objectCount);
+    std::vector<void*> devPtrs(totalBlobs);
+    std::vector<size_t> blobSizes(totalBlobs, config.blobSize);
+    
+    for (size_t i = 0; i < objectCount; i++) {
+        aclrtMallocHost(&hostPins[i], objectSize);
+        std::memset(hostPins[i], 'I' + i, objectSize);
+    }
+    for (size_t i = 0; i < totalBlobs; i++) {
+        aclrtMalloc(&devPtrs[i], config.blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    }
+    
+    std::vector<size_t> objectSizes(objectCount, objectSize);
+    std::vector<size_t> blobCounts(objectCount, blobsPerObject);
+    std::vector<size_t> blobOffsets(objectCount);
+    for (size_t i = 0; i < objectCount; i++) {
+        blobOffsets[i] = i * blobsPerObject;
+    }
+    
+    aclrtStream h2dStream, fftsStream;
+    aclrtCreateStream(&h2dStream);
+    aclrtCreateStream(&fftsStream);
+    
+    FftsDispatcherMinimal dispatcher;
+    dispatcher.Init();
+    dispatcher.CreateFftsCtxs(1);
+    dispatcher.SetFftsCtx(0);
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    int ret = ThreeStageH2D_Huge(
+        hostPins.data(), devPtrs.data(),
+        objectSizes.data(), blobSizes.data(),
+        blobCounts.data(), blobOffsets.data(),
+        objectCount, 0, h2dStream, fftsStream, &dispatcher);
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    double seconds = std::chrono::duration<double>(end - start).count();
+    size_t totalBytes = totalBlobs * config.blobSize;
+    double bandwidth = CalculateBandwidth(totalBytes, seconds);
+    
+    printf("  3-Stage-H: %.2f GB/s", bandwidth);
+    if (ret != 0) printf(" (failed: %d)", ret);
+    printf("\n");
+    
+    aclrtDestroyStream(h2dStream);
+    aclrtDestroyStream(fftsStream);
+    for (size_t i = 0; i < objectCount; i++) {
+        aclrtFreeHost(hostPins[i]);
+    }
+    for (size_t i = 0; i < totalBlobs; i++) {
+        aclrtFree(devPtrs[i]);
+    }
+}
+
 bool CheckFftsH2DSupport() {
     const size_t testCount = 2;
     const size_t testSize = 4 * 1024;
@@ -228,6 +290,7 @@ int main() {
         BenchmarkAsyncPipeline(config);
         BenchmarkFftsH2D(config, fftsSupported);
         BenchmarkThreeStage(config);
+        BenchmarkThreeStageHuge(config);
     }
     
     printf("\n========================================\n");

@@ -24,6 +24,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Link directories
 link_directories(${CANN_ROOT}/lib64)
 
+# Enable NPU (Ascend) FFTS support
+add_compile_definitions(USE_NPU)
+
 # Source files
 set(COMMON_SRC
     src/ffts_dispatcher_minimal.cpp
@@ -31,6 +34,7 @@ set(COMMON_SRC
     src/async_pipeline_h2d.cpp
     src/ffts_h2d.cpp
     src/three_stage_h2d.cpp
+    src/three_stage_h2d_huge.cpp
 )
 
 # Feasibility test
