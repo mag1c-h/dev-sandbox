@@ -7,8 +7,10 @@
 #ifdef USE_NPU
 #include <runtime/rt_ffts_plus.h>
 #include <runtime/rt_ffts_plus_define.h>
+#include <runtime/dev.h>
 #else
 typedef void* aclrtStream;
+typedef void* rtNotify_t;
 typedef struct {} rtFftsPlusComCtx_t;
 typedef struct {} rtFftsPlusSdmaCtx_t;
 typedef struct {} rtFftsPlusSqe_t;

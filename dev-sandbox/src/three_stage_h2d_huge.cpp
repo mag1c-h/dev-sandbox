@@ -1,6 +1,7 @@
 #include "three_stage_h2d_huge.h"
 #include "ffts_dispatcher_minimal.h"
 #include <acl/acl.h>
+#include <runtime/dev.h>
 #include <vector>
 #include <cstring>
 #include <algorithm>
@@ -39,40 +40,40 @@ int ThreeStageH2D_Huge(
         return aclRet;
     }
     
-    aclrtNotify toPinDone[2] = {nullptr, nullptr};
-    aclrtNotify toDestDone[2] = {nullptr, nullptr};
+    rtNotify_t toPinDone[2] = {nullptr, nullptr};
+    rtNotify_t toDestDone[2] = {nullptr, nullptr};
     
     for (int i = 0; i < 2; i++) {
-        aclRet = aclrtNotifyCreate(&toPinDone[i]);
-        if (aclRet != ACL_SUCCESS) {
+        int rtRet = rtNotifyCreate(static_cast<int32_t>(deviceId), &toPinDone[i]);
+        if (rtRet != 0) {
             for (int j = 0; j < i; j++) {
-                aclrtNotifyDestroy(toPinDone[j]);
-                aclrtNotifyDestroy(toDestDone[j]);
+                rtNotifyDestroy(toPinDone[j]);
+                rtNotifyDestroy(toDestDone[j]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
-        aclRet = aclrtNotifyCreate(&toDestDone[i]);
-        if (aclRet != ACL_SUCCESS) {
-            aclrtNotifyDestroy(toPinDone[i]);
+        rtRet = rtNotifyCreate(static_cast<int32_t>(deviceId), &toDestDone[i]);
+        if (rtRet != 0) {
+            rtNotifyDestroy(toPinDone[i]);
             for (int j = 0; j < i; j++) {
-                aclrtNotifyDestroy(toPinDone[j]);
-                aclrtNotifyDestroy(toDestDone[j]);
+                rtNotifyDestroy(toPinDone[j]);
+                rtNotifyDestroy(toDestDone[j]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
     }
     
-    aclRet = aclrtNotifyRecord(toDestDone[0], fftsStream);
-    if (aclRet != ACL_SUCCESS) {
-        aclRet = aclrtNotifyRecord(toDestDone[0], h2dStream);
+    int rtRet = rtNotifyRecord(toDestDone[0], fftsStream);
+    if (rtRet != 0) {
+        rtRet = rtNotifyRecord(toDestDone[0], h2dStream);
     }
-    aclRet = aclrtNotifyRecord(toDestDone[1], fftsStream);
-    if (aclRet != ACL_SUCCESS) {
-        aclRet = aclrtNotifyRecord(toDestDone[1], h2dStream);
+    rtRet = rtNotifyRecord(toDestDone[1], fftsStream);
+    if (rtRet != 0) {
+        rtRet = rtNotifyRecord(toDestDone[1], h2dStream);
     }
     
     const size_t MAX_PARALLEL = 8;
@@ -80,15 +81,15 @@ int ThreeStageH2D_Huge(
     for (size_t objIdx = 0; objIdx < objectCount; objIdx++) {
         size_t slot = objIdx % 2;
         
-        aclRet = aclrtNotifyWait(toDestDone[slot], h2dStream);
-        if (aclRet != ACL_SUCCESS) {
+        rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
+        if (rtRet != 0) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
         
         aclRet = aclrtMemcpyAsync(
@@ -97,34 +98,34 @@ int ThreeStageH2D_Huge(
             ACL_MEMCPY_HOST_TO_DEVICE, h2dStream);
         if (aclRet != ACL_SUCCESS) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
             return aclRet;
         }
         
-        aclRet = aclrtNotifyRecord(toPinDone[slot], h2dStream);
-        if (aclRet != ACL_SUCCESS) {
+        rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
+        if (rtRet != 0) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
         
-        aclRet = aclrtNotifyWait(toPinDone[slot], fftsStream);
-        if (aclRet != ACL_SUCCESS) {
+        rtRet = rtNotifyWait(toPinDone[slot], fftsStream);
+        if (rtRet != 0) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
         
         dispatcher->ReuseCtx(0);
@@ -146,8 +147,8 @@ int ThreeStageH2D_Huge(
                 &taskIds[blobIdx]);
             if (ret != 0) {
                 for (int i = 0; i < 2; i++) {
-                    aclrtNotifyDestroy(toPinDone[i]);
-                    aclrtNotifyDestroy(toDestDone[i]);
+                    rtNotifyDestroy(toPinDone[i]);
+                    rtNotifyDestroy(toDestDone[i]);
                 }
                 aclrtFree(devicePinBuffers[0]);
                 aclrtFree(devicePinBuffers[1]);
@@ -167,8 +168,8 @@ int ThreeStageH2D_Huge(
         int ret = dispatcher->LaunchFftsTask(fftsStream, readyCount, 0);
         if (ret != 0) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
@@ -177,23 +178,23 @@ int ThreeStageH2D_Huge(
         
         dispatcher->ReuseCtx(0);
         
-        aclRet = aclrtNotifyRecord(toDestDone[slot], fftsStream);
-        if (aclRet != ACL_SUCCESS) {
+        rtRet = rtNotifyRecord(toDestDone[slot], fftsStream);
+        if (rtRet != 0) {
             for (int i = 0; i < 2; i++) {
-                aclrtNotifyDestroy(toPinDone[i]);
-                aclrtNotifyDestroy(toDestDone[i]);
+                rtNotifyDestroy(toPinDone[i]);
+                rtNotifyDestroy(toDestDone[i]);
             }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
-            return aclRet;
+            return rtRet;
         }
     }
     
     aclRet = aclrtSynchronizeStream(h2dStream);
     if (aclRet != ACL_SUCCESS) {
         for (int i = 0; i < 2; i++) {
-            aclrtNotifyDestroy(toPinDone[i]);
-            aclrtNotifyDestroy(toDestDone[i]);
+            rtNotifyDestroy(toPinDone[i]);
+            rtNotifyDestroy(toDestDone[i]);
         }
         aclrtFree(devicePinBuffers[0]);
         aclrtFree(devicePinBuffers[1]);
@@ -203,8 +204,8 @@ int ThreeStageH2D_Huge(
     aclRet = aclrtSynchronizeStream(fftsStream);
     if (aclRet != ACL_SUCCESS) {
         for (int i = 0; i < 2; i++) {
-            aclrtNotifyDestroy(toPinDone[i]);
-            aclrtNotifyDestroy(toDestDone[i]);
+            rtNotifyDestroy(toPinDone[i]);
+            rtNotifyDestroy(toDestDone[i]);
         }
         aclrtFree(devicePinBuffers[0]);
         aclrtFree(devicePinBuffers[1]);
@@ -212,8 +213,8 @@ int ThreeStageH2D_Huge(
     }
     
     for (int i = 0; i < 2; i++) {
-        aclrtNotifyDestroy(toPinDone[i]);
-        aclrtNotifyDestroy(toDestDone[i]);
+        rtNotifyDestroy(toPinDone[i]);
+        rtNotifyDestroy(toDestDone[i]);
     }
     aclrtFree(devicePinBuffers[0]);
     aclrtFree(devicePinBuffers[1]);
