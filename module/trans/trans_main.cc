@@ -21,19 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#include <fmt/core.h>
 #include <fmt/ranges.h>
-#include <string>
 #include <unordered_map>
-#include <vector>
-
-enum class TransType : uint8_t { H2D, D2H };
+#include "trans_case.h"
 
 struct TransArgs {
     std::vector<std::string> hosts;
     std::vector<std::string> devices;
     std::vector<std::string> methods;
-    TransType type{TransType::H2D};
+    TransType type{TransType::ANY};
     std::size_t size{32 * 1024};
     std::size_t number{1024};
     std::size_t nDevice{8};
@@ -44,10 +40,10 @@ struct TransArgs {
     {
         fmt::println("Usage: {} [options]", proc ? proc : "trans");
         fmt::println("Options:");
-        fmt::println("  -H <host>      Host memory (can be specified multiple times)");
-        fmt::println("  -D <device>    Device memory (can be specified multiple times)");
+        fmt::println("  -H <host>      Host buffer (can be specified multiple times)");
+        fmt::println("  -D <device>    Device buffer (can be specified multiple times)");
         fmt::println("  -M <method>    Transfer method (can be specified multiple times)");
-        fmt::println("  -t <type>      Transfer type: H2D or D2H (default: H2D)");
+        fmt::println("  -t <type>      Transfer type: H2D or D2H (runs all if not specified)");
         fmt::println("  -s <size>      Transfer size in bytes (default: 32768)");
         fmt::println("  -n <number>    Number of items (default: 1024)");
         fmt::println("  -d <nDevice>   Number of devices (default: 8)");
@@ -59,7 +55,8 @@ struct TransArgs {
         fmt::println("TransArgs::hosts = [{}]", fmt::join(hosts, ", "));
         fmt::println("TransArgs::devices = [{}]", fmt::join(devices, ", "));
         fmt::println("TransArgs::methods = [{}]", fmt::join(methods, ", "));
-        fmt::println("TransArgs::type = {}", type == TransType::H2D ? "H2D" : "D2H");
+        fmt::println("TransArgs::type = {}",
+                     type == TransType::ANY ? "ANY" : (type == TransType::H2D ? "H2D" : "D2H"));
         fmt::println("TransArgs::size = {}", size);
         fmt::println("TransArgs::number = {}", number);
         fmt::println("TransArgs::nDevice = {}", nDevice);
@@ -138,5 +135,13 @@ int main(int argc, char const* argv[])
     auto ret = args.Parse(argc, argv);
     if (ret != 0) { return ret; }
     args.Show();
+    auto& factory = TransCaseFactory::Instance();
+    auto cases = factory.Filter(args.type, args.hosts, args.devices, args.methods);
+    if (cases.empty()) {
+        factory.ShowAllCases();
+        return -1;
+    }
+    TransCtx ctx{args.size, args.number, args.nIteration, args.nDevice};
+    for (const auto& c : cases) { c->Run(ctx); }
     return 0;
 }
