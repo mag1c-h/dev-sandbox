@@ -24,6 +24,7 @@
 #include <fmt/ranges.h>
 #include <unordered_map>
 #include "trans_case.h"
+#include "trans_runtime.h"
 
 struct TransArgs {
     std::vector<std::string> hosts;
@@ -141,6 +142,7 @@ int main(int argc, char const* argv[])
         factory.ShowAllCases();
         return -1;
     }
+    TransRuntime runtime;
     TransCtx ctx{args.size, args.number, args.nIteration, args.nDevice};
     for (const auto& c : cases) { c->Run(ctx); }
     return 0;
