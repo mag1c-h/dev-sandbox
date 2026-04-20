@@ -45,6 +45,7 @@ cmake --build build -j
 - `module/aio`: 异步 I/O 性能测试工具
 - `module/copy`: 设备间内存拷贝性能测试
 - `module/logger`: 日志库
+- `module/trans`: 数据传输性能测试
 - `vendor/`: 第三方依赖（通过 FetchContent 下载）
 
 ## 依赖管理
