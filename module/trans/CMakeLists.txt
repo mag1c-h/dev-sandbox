@@ -12,8 +12,14 @@ elseif(ASCEND_FOUND)
     target_sources(trans PRIVATE
         ascend/trans_runtime_ascend.cc
         ascend/trans_case_ascend.cc
+        ascend/trans_ffts_dispatcher_ascend.cc
     )
-    target_link_libraries(trans PRIVATE Ascend::Runtime)
+    target_include_directories(trans PRIVATE
+        ${ASCEND_ROOT}/aarch64-linux/pkg_inc
+        ${ASCEND_ROOT}/aarch64-linux/pkg_inc/profiling
+        ${ASCEND_ROOT}/aarch64-linux/pkg_inc/runtime
+    )
+    target_link_libraries(trans PRIVATE Ascend::Runtime ${ASCEND_ROOT}/lib64/libruntime.so)
 else()
     target_sources(trans PRIVATE
         simu/trans_runtime_simu.cc
