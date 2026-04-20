@@ -9,6 +9,12 @@ if (CUDA_FOUND)
     )
     target_link_libraries(trans PRIVATE CUDA::Runtime)
 elseif(ASCEND_FOUND)
+    target_sources(trans PRIVATE
+        ascend/trans_runtime_ascend.cc
+        ascend/trans_case_ascend.cc
+        ascend/trans_kernel_ascend.cu
+    )
+    target_link_libraries(trans PRIVATE Ascend::Runtime)
 else()
     target_sources(trans PRIVATE
         simu/trans_runtime_simu.cc
