@@ -214,4 +214,87 @@ public:
     std::string Name() const override { return "batch-ce"; }
 };
 
+class TransMultiStreamTemplate : public TransStreamTemplate {
+protected:
+    std::size_t streamCount_;
+    void OnTransPre(const std::vector<const TransBuffer*>& srcBuffers,
+                    const std::vector<const TransBuffer*>& dstBuffers) override
+    {
+        tasks_.clear();
+        TRANS_ASSERT(srcBuffers.size() == dstBuffers.size());
+        for (std::size_t i = 0; i < srcBuffers.size(); i++) {
+            auto& srcBuffer = *srcBuffers[i];
+            auto& dstBuffer = *dstBuffers[i];
+            TRANS_ASSERT(srcBuffer.Number() == dstBuffer.Number());
+            TRANS_ASSERT(srcBuffer.Size() == dstBuffer.Size());
+            auto bufferCount = srcBuffer.Number();
+            auto base = bufferCount / streamCount_;
+            auto remainder = bufferCount % streamCount_;
+            auto device = AffinityDeviceId(srcBuffer, dstBuffer);
+            ASCEND_ASSERT(aclrtSetDevice(device));
+            std::size_t offset = 0;
+            for (std::size_t s = 0; s < streamCount_; s++) {
+                size_t count = base + (s < remainder ? 1 : 0);
+                if (count == 0) { continue; }
+                TransTask task;
+                task.device = device;
+                task.size = srcBuffer.Size();
+                ASCEND_ASSERT(aclrtCreateStream(&task.stream));
+                ASCEND_ASSERT(aclrtCreateEvent(&task.finish));
+                for (size_t j = 0; j < count; j++) {
+                    task.src.push_back(srcBuffer[offset + j]);
+                    task.dst.push_back(dstBuffer[offset + j]);
+                }
+                tasks_.push_back(std::move(task));
+                offset += count;
+            }
+        }
+    }
+
+public:
+    TransMultiStreamTemplate(std::size_t streamCount, std::size_t iterations, bool affinitySrc)
+        : TransStreamTemplate{iterations, affinitySrc}, streamCount_(streamCount)
+    {
+    }
+    std::string Name() const override { return std::to_string(streamCount_) + "-stream"; }
+};
+
+class TransH2DMultiStreamTemplate : public TransMultiStreamTemplate {
+protected:
+    void OnTransSubmit(TransTask& task) const override
+    {
+        ASCEND_ASSERT(aclrtSetDevice(task.device));
+        for (std::size_t i = 0; i < task.src.size(); i++) {
+            ASCEND_ASSERT(aclrtMemcpyAsync(task.dst[i], task.size, task.src[i], task.size,
+                                           ACL_MEMCPY_HOST_TO_DEVICE, task.stream));
+        }
+        ASCEND_ASSERT(aclrtRecordEvent(task.finish, task.stream));
+    }
+
+public:
+    TransH2DMultiStreamTemplate(std::size_t streamCount, std::size_t iterations, bool affinitySrc)
+        : TransMultiStreamTemplate{streamCount, iterations, affinitySrc}
+    {
+    }
+};
+
+class TransD2HMultiStreamTemplate : public TransMultiStreamTemplate {
+protected:
+    void OnTransSubmit(TransTask& task) const override
+    {
+        ASCEND_ASSERT(aclrtSetDevice(task.device));
+        for (std::size_t i = 0; i < task.src.size(); i++) {
+            ASCEND_ASSERT(aclrtMemcpyAsync(task.dst[i], task.size, task.src[i], task.size,
+                                           ACL_MEMCPY_DEVICE_TO_HOST, task.stream));
+        }
+        ASCEND_ASSERT(aclrtRecordEvent(task.finish, task.stream));
+    }
+
+public:
+    TransD2HMultiStreamTemplate(std::size_t streamCount, std::size_t iterations, bool affinitySrc)
+        : TransMultiStreamTemplate{streamCount, iterations, affinitySrc}
+    {
+    }
+};
+
 #endif

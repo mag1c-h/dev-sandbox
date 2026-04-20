@@ -155,3 +155,59 @@ DEFINE_TRANS_D2H_CASE("trans from device(normal) to host(registered) with `batch
     }
     result.Show("[D2H] " + brief);
 }
+
+DEFINE_TRANS_H2D_CASE("trans from host(normal) to device(normal) with `ms_48`", normal, normal,
+                      ms_48, ctx)
+{
+    constexpr std::size_t streamCount = 48;
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransHostNormalBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransDeviceNormalBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransH2DMultiStreamTemplate transTemplate{streamCount, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[H2D] " + brief);
+}
+
+DEFINE_TRANS_H2D_CASE("trans from host(registered) to device(normal) with `ms_48`", registered,
+                      normal, ms_48, ctx)
+{
+    constexpr std::size_t streamCount = 48;
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransHostRegisteredBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransDeviceNormalBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransH2DMultiStreamTemplate transTemplate{streamCount, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[H2D] " + brief);
+}
+
+DEFINE_TRANS_D2H_CASE("trans from device(normal) to host(normal) with `ms_48`", normal, normal,
+                      ms_48, ctx)
+{
+    constexpr std::size_t streamCount = 48;
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransDeviceNormalBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransHostNormalBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransD2HMultiStreamTemplate transTemplate{streamCount, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[D2H] " + brief);
+}
+
+DEFINE_TRANS_D2H_CASE("trans from device(normal) to host(registered) with `ms_48`", normal,
+                      registered, ms_48, ctx)
+{
+    constexpr std::size_t streamCount = 48;
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransDeviceNormalBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransHostRegisteredBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransD2HMultiStreamTemplate transTemplate{streamCount, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[D2H] " + brief);
+}
