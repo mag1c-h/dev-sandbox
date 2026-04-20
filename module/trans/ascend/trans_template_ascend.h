@@ -25,7 +25,6 @@
 #define TRANS_TEMPLATE_ASCEND_H
 
 #include "trans_assert_ascend.h"
-#include "trans_kernel_ascend.h"
 #include "trans_stopwatch.h"
 #include "trans_template.h"
 
@@ -33,8 +32,8 @@ class TransStreamTemplate : public TransTemplate {
 protected:
     struct TransTask {
         std::size_t device;
-        ascendStream_t stream;
-        ascendEvent_t finish;
+        aclrtStream stream;
+        aclrtEvent finish;
         std::size_t size;
         std::vector<void*> src;
         std::vector<void*> dst;
@@ -67,8 +66,8 @@ protected:
     virtual void OnTransSubmit(TransTask& task) const = 0;
     std::pair<std::size_t, std::size_t> OnTrans() override
     {
-        ascendEvent_t start;
-        ascendEvent_t end;
+        aclrtEvent start;
+        aclrtEvent end;
         auto& first = tasks_[0];
         ASCEND_ASSERT(aclrtSetDevice(first.device));
         ASCEND_ASSERT(aclrtCreateEvent(&start));
