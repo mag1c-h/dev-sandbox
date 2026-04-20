@@ -21,18 +21,18 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#include "trans_ffts_dispatcher_ascend.h"
+#include "trans_dma_dispatcher_ascend.h"
 #include <cstring>
 #include "trans_assert_ascend.h"
 
-TransFftsDispatcher::TransFftsDispatcher(std::size_t device)
+TransDmaDispatcher::TransDmaDispatcher(std::size_t device)
 {
     ASCEND_ASSERT(aclrtSetDevice(device));
 }
 
-TransFftsDispatcher::~TransFftsDispatcher() = default;
+TransDmaDispatcher::~TransDmaDispatcher() = default;
 
-void TransFftsDispatcher::CreateFftsCtxs(std::size_t amount)
+void TransDmaDispatcher::CreateDmaCtxs(std::size_t amount)
 {
     ctxs_.resize(amount);
     for (std::size_t i = 0; i < amount; i++) {
@@ -42,33 +42,32 @@ void TransFftsDispatcher::CreateFftsCtxs(std::size_t amount)
     }
 }
 
-void TransFftsDispatcher::SetFftsCtx(std::size_t index) { currentCtx_ = &ctxs_[index]; }
+void TransDmaDispatcher::SetDmaCtx(std::size_t index) { currentCtx_ = &ctxs_[index]; }
 
-void TransFftsDispatcher::MemcpyAsync(void* dst, const void* src, std::size_t size,
-                                      std::size_t* taskId)
+void TransDmaDispatcher::MemcpyAsync(void* dst, const void* src, std::size_t size,
+                                     std::size_t* taskId)
 {
     if (currentCtx_->refreshIndex >= currentCtx_->contexts.size()) {
         currentCtx_->contexts.resize(currentCtx_->contexts.size() * 2);
     }
     auto& ctx = currentCtx_->contexts[currentCtx_->refreshIndex];
     std::memset(&ctx, 0, sizeof(ctx));
-    rtFftsPlusSdmaCtx_t* sdmaCtx = reinterpret_cast<rtFftsPlusSdmaCtx_t*>(&ctx);
-    sdmaCtx->contextType = RT_CTX_TYPE_SDMA;
-    sdmaCtx->threadDim = 1;
-    sdmaCtx->sdmaSqeHeader = 0x1E70;  // SDMA_FP32_ATOMIC_MOVE_SQE
+    ctx.contextType = RT_CTX_TYPE_SDMA;
+    ctx.threadDim = 1;
+    ctx.sdmaSqeHeader = 0x1E70;  // SDMA_FP32_ATOMIC_MOVE_SQE
     const uint64_t lowMask = 0x00000000ffffffffULL;
     const uint64_t highMask = 0xffffffff00000000ULL;
-    sdmaCtx->sourceAddressBaseL = reinterpret_cast<uint64_t>(src) & lowMask;
-    sdmaCtx->sourceAddressBaseH = (reinterpret_cast<uint64_t>(src) & highMask) >> 32;
-    sdmaCtx->destinationAddressBaseL = reinterpret_cast<uint64_t>(dst) & lowMask;
-    sdmaCtx->destinationAddressBaseH = (reinterpret_cast<uint64_t>(dst) & highMask) >> 32;
-    sdmaCtx->nonTailDataLength = size;
-    sdmaCtx->tailDataLength = size;
+    ctx.sourceAddressBaseL = reinterpret_cast<uint64_t>(src) & lowMask;
+    ctx.sourceAddressBaseH = (reinterpret_cast<uint64_t>(src) & highMask) >> 32;
+    ctx.destinationAddressBaseL = reinterpret_cast<uint64_t>(dst) & lowMask;
+    ctx.destinationAddressBaseH = (reinterpret_cast<uint64_t>(dst) & highMask) >> 32;
+    ctx.nonTailDataLength = size;
+    ctx.tailDataLength = size;
     *taskId = currentCtx_->refreshIndex;
     currentCtx_->refreshIndex++;
 }
 
-void TransFftsDispatcher::AddTaskDependency(std::size_t predecessorId, std::size_t successorId)
+void TransDmaDispatcher::AddTaskDependency(std::size_t predecessorId, std::size_t successorId)
 {
     auto& predCtx = currentCtx_->contexts[predecessorId];
     TRANS_ASSERT(predCtx.successorNum < RT_CTX_SUCCESSOR_NUM);
@@ -79,8 +78,8 @@ void TransFftsDispatcher::AddTaskDependency(std::size_t predecessorId, std::size
     succCtx.predCnt++;
 }
 
-void TransFftsDispatcher::LaunchFftsTask(aclrtStream stream, std::size_t readyCount,
-                                         std::size_t ctxIndex)
+void TransDmaDispatcher::LaunchDmaTask(aclrtStream stream, std::size_t readyCount,
+                                       std::size_t ctxIndex)
 {
     currentCtx_->ctxNum = currentCtx_->refreshIndex;
     if (currentCtx_->ctxNum == 0) { return; }
@@ -95,7 +94,7 @@ void TransFftsDispatcher::LaunchFftsTask(aclrtStream stream, std::size_t readyCo
     rtFftsPlusTaskInfo_t task = {};
     task.fftsPlusSqe = &sqe;
     task.descBuf = currentCtx_->contexts.data();
-    task.descBufLen = currentCtx_->ctxNum * sizeof(rtFftsPlusComCtx_t);
+    task.descBufLen = currentCtx_->ctxNum * sizeof(rtFftsPlusSdmaCtx_t);
     task.descAddrType = 0;
     task.argsHandleInfoNum = 0;
     task.argsHandleInfoPtr = nullptr;
@@ -108,7 +107,7 @@ void TransFftsDispatcher::LaunchFftsTask(aclrtStream stream, std::size_t readyCo
     TRANS_ASSERT(ret == 0);
 }
 
-void TransFftsDispatcher::ReuseCtx(std::size_t index)
+void TransDmaDispatcher::ReuseCtx(std::size_t index)
 {
     ctxs_[index].refreshIndex = 0;
     ctxs_[index].ctxNum = 0;

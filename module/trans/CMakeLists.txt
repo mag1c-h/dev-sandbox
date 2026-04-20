@@ -12,7 +12,7 @@ elseif(ASCEND_FOUND)
     target_sources(trans PRIVATE
         ascend/trans_runtime_ascend.cc
         ascend/trans_case_ascend.cc
-        ascend/trans_ffts_dispatcher_ascend.cc
+        ascend/trans_dma_dispatcher_ascend.cc
     )
     target_include_directories(trans PRIVATE
         ${ASCEND_ROOT}/aarch64-linux/pkg_inc

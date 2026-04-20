@@ -21,32 +21,32 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#ifndef TRANS_FFTS_DISPATCHER_ASCEND_H
-#define TRANS_FFTS_DISPATCHER_ASCEND_H
+#ifndef TRANS_DMA_DISPATCHER_ASCEND_H
+#define TRANS_DMA_DISPATCHER_ASCEND_H
 
 #include <acl/acl.h>
 #include <runtime/rt.h>
 #include <vector>
 
-class TransFftsDispatcher {
-    struct FftsCtx {
-        std::vector<rtFftsPlusComCtx_t> contexts;
+class TransDmaDispatcher {
+    struct DmaCtx {
+        std::vector<rtFftsPlusSdmaCtx_t> contexts;
         uint32_t refreshIndex = 0;
         uint32_t ctxNum = 0;
     };
 
-    std::vector<FftsCtx> ctxs_;
-    FftsCtx* currentCtx_ = nullptr;
+    std::vector<DmaCtx> ctxs_;
+    DmaCtx* currentCtx_ = nullptr;
 
 public:
-    TransFftsDispatcher(std::size_t device);
-    ~TransFftsDispatcher();
-    void CreateFftsCtxs(std::size_t amount);
-    void SetFftsCtx(std::size_t index);
+    TransDmaDispatcher(std::size_t device);
+    ~TransDmaDispatcher();
+    void CreateDmaCtxs(std::size_t amount);
+    void SetDmaCtx(std::size_t index);
     void MemcpyAsync(void* dst, const void* src, std::size_t size, std::size_t* taskId);
     void AddTaskDependency(std::size_t predecessorId, std::size_t successorId);
-    void LaunchFftsTask(aclrtStream stream, std::size_t readyCount, std::size_t ctxIndex);
+    void LaunchDmaTask(aclrtStream stream, std::size_t readyCount, std::size_t ctxIndex);
     void ReuseCtx(std::size_t index);
 };
 
-#endif  // TRANS_FFTS_DISPATCHER_ASCEND_H
+#endif  // TRANS_DMA_DISPATCHER_ASCEND_H
