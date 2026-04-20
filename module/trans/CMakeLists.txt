@@ -4,5 +4,8 @@ target_link_libraries(trans PRIVATE fmt::fmt)
 if (CUDA_FOUND)
 elseif(ASCEND_FOUND)
 else()
-    target_sources(trans PRIVATE simu/trans_runtime_simu.cc)
+    target_sources(trans PRIVATE
+        simu/trans_runtime_simu.cc
+        simu/trans_case_simu.cc
+    )
 endif()

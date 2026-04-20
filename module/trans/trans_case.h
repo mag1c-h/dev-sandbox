@@ -73,6 +73,7 @@ public:
     void Register(std::shared_ptr<TransCase> c) { cases_.push_back(std::move(c)); }
     void ShowAllCases() const
     {
+        fmt::println("[[ ALL CASES ]]");
         auto formatPrefix = [](const auto& c) {
             auto typeStr = c->type == TransType::H2D ? "[H2D]" : "[D2H]";
             auto src = c->type == TransType::H2D ? c->host : c->device;
@@ -86,7 +87,8 @@ public:
         for (const auto& c : sorted) { maxLen = std::max(maxLen, formatPrefix(c).length()); }
         for (const auto& c : sorted) {
             auto prefix = formatPrefix(c);
-            fmt::println("{}{} : {}", prefix, std::string(maxLen - prefix.length(), ' '), c->brief);
+            fmt::println("  {}{} : {}", prefix, std::string(maxLen - prefix.length(), ' '),
+                         c->brief);
         }
     }
     std::vector<std::shared_ptr<TransCase>> Filter(const TransType& type,
@@ -126,10 +128,12 @@ public:
     static Registrar<ClassName> global_##ClassName##_registrar;              \
     void ClassName::Run(const TransCtx& Ctx) const
 
-#define DEFINE_TRANS_H2D_CASE(ClassName, Brief, Host, Device, Method, Ctx) \
-    DEFINE_TRANS_CASE(ClassName, Brief, TransType::H2D, Host, Device, Method, Ctx)
+#define DEFINE_TRANS_H2D_CASE(Brief, Host, Device, Method, Ctx)                                   \
+    DEFINE_TRANS_CASE(_H2D_##Host##_To_##Device##_With_##Method##_, Brief, TransType::H2D, #Host, \
+                      #Device, #Method, Ctx)
 
-#define DEFINE_TRANS_D2H_CASE(ClassName, Brief, Host, Device, Method, Ctx) \
-    DEFINE_TRANS_CASE(ClassName, Brief, TransType::D2H, Host, Device, Method, Ctx)
+#define DEFINE_TRANS_D2H_CASE(Brief, Device, Host, Method, Ctx)                                   \
+    DEFINE_TRANS_CASE(_D2H_##Device##_To_##Host##_With_##Method##_, Brief, TransType::D2H, #Host, \
+                      #Device, #Method, Ctx)
 
 #endif

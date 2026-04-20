@@ -29,16 +29,16 @@
 #include <sys/mman.h>
 #include "trans_buffer.h"
 
-class HostNormalBuffer : public TransBuffer {
+class TransHostNormalBuffer : public TransBuffer {
 public:
-    HostNormalBuffer(std::size_t device, std::size_t size, std::size_t number)
+    TransHostNormalBuffer(std::size_t device, std::size_t size, std::size_t number)
         : TransBuffer{device, size, number}
     {
         const auto total = size * number;
         addr_ = malloc(total);
         std::memset(addr_, 'n', total);
     }
-    ~HostNormalBuffer() override
+    ~TransHostNormalBuffer() override
     {
         if (addr_) { free(addr_); }
         addr_ = nullptr;
@@ -46,9 +46,9 @@ public:
     std::string Name() const override { return "host::normal::" + std::to_string(device_); }
 };
 
-class HostAnonymousBuffer : public TransBuffer {
+class TransHostAnonymousBuffer : public TransBuffer {
 public:
-    HostAnonymousBuffer(std::size_t device, std::size_t size, std::size_t number)
+    TransHostAnonymousBuffer(std::size_t device, std::size_t size, std::size_t number)
         : TransBuffer{device, size, number}
     {
         const auto total = size * number;
@@ -57,7 +57,7 @@ public:
         addr_ = mmap(nullptr, total, prot, flags, -1, 0);
         std::memset(addr_, 'a', total);
     }
-    ~HostAnonymousBuffer() override
+    ~TransHostAnonymousBuffer() override
     {
         const auto total = size_ * number_;
         if (addr_) { munmap(addr_, total); }
@@ -66,9 +66,9 @@ public:
     std::string Name() const override { return "host::anon::" + std::to_string(device_); }
 };
 
-class DeviceNormalBuffer : public TransBuffer {
+class TransDeviceNormalBuffer : public TransBuffer {
 public:
-    DeviceNormalBuffer(std::size_t device, std::size_t size, std::size_t number)
+    TransDeviceNormalBuffer(std::size_t device, std::size_t size, std::size_t number)
         : TransBuffer{device, size, number}
     {
         const std::size_t total = size * number;
@@ -76,7 +76,7 @@ public:
         posix_memalign(&addr_, alignment, total);
         std::memset(addr_, 'p', total);
     }
-    ~DeviceNormalBuffer() override
+    ~TransDeviceNormalBuffer() override
     {
         if (addr_) { free(addr_); }
         addr_ = nullptr;

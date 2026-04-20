@@ -53,15 +53,16 @@ struct TransArgs {
     }
     void Show() const
     {
-        fmt::println("TransArgs::hosts = [{}]", fmt::join(hosts, ", "));
-        fmt::println("TransArgs::devices = [{}]", fmt::join(devices, ", "));
-        fmt::println("TransArgs::methods = [{}]", fmt::join(methods, ", "));
-        fmt::println("TransArgs::type = {}",
+        fmt::println("[[ INPUTS ]]");
+        fmt::println("  TransArgs::hosts = [{}]", fmt::join(hosts, ", "));
+        fmt::println("  TransArgs::devices = [{}]", fmt::join(devices, ", "));
+        fmt::println("  TransArgs::methods = [{}]", fmt::join(methods, ", "));
+        fmt::println("  TransArgs::type = {}",
                      type == TransType::ANY ? "ANY" : (type == TransType::H2D ? "H2D" : "D2H"));
-        fmt::println("TransArgs::size = {}", size);
-        fmt::println("TransArgs::number = {}", number);
-        fmt::println("TransArgs::nDevice = {}", nDevice);
-        fmt::println("TransArgs::nIteration = {}", nIteration);
+        fmt::println("  TransArgs::size = {}", size);
+        fmt::println("  TransArgs::number = {}", number);
+        fmt::println("  TransArgs::nDevice = {}", nDevice);
+        fmt::println("  TransArgs::nIteration = {}", nIteration);
     }
     int32_t Parse(int argc, char const* argv[])
     {
