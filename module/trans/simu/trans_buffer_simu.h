@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/mman.h>
+#include "trans_assert_simu.h"
 #include "trans_buffer.h"
 
 class TransHostNormalBuffer : public TransBuffer {
@@ -36,6 +37,7 @@ public:
     {
         const auto total = size * number;
         addr_ = malloc(total);
+        TRANS_ASSERT(addr_ != nullptr);
         std::memset(addr_, 'n', total);
     }
     ~TransHostNormalBuffer() override
@@ -55,6 +57,8 @@ public:
         const auto prot = PROT_WRITE | PROT_READ;
         const auto flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE;
         addr_ = mmap(nullptr, total, prot, flags, -1, 0);
+        TRANS_ASSERT(addr_ != nullptr);
+        TRANS_ASSERT(addr_ != MAP_FAILED);
         std::memset(addr_, 'a', total);
     }
     ~TransHostAnonymousBuffer() override
@@ -73,7 +77,7 @@ public:
     {
         const std::size_t total = size * number;
         const std::size_t alignment = 4096;
-        posix_memalign(&addr_, alignment, total);
+        TRANS_ASSERT(posix_memalign(&addr_, alignment, total) == 0);
         std::memset(addr_, 'p', total);
     }
     ~TransDeviceNormalBuffer() override
