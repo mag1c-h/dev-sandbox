@@ -25,10 +25,11 @@
 #define TRANS_TEMPLATE_CUDA_H
 
 #include "trans_assert_cuda.h"
+#include "trans_kernel_cuda.h"
 #include "trans_stopwatch.h"
 #include "trans_template.h"
 
-class TransCETemplate : public TransTemplate {
+class TransStreamTemplate : public TransTemplate {
 protected:
     struct TransTask {
         std::size_t device;
@@ -106,14 +107,13 @@ protected:
     }
 
 public:
-    TransCETemplate(std::size_t iterations, bool affinitySrc)
+    TransStreamTemplate(std::size_t iterations, bool affinitySrc)
         : TransTemplate{iterations, affinitySrc}
     {
     }
-    std::string Name() const override { return "ce"; }
 };
 
-class TransH2DCETemplate : public TransCETemplate {
+class TransH2DCETemplate : public TransStreamTemplate {
 protected:
     void OnTransSubmit(TransTask& task) const override
     {
@@ -127,12 +127,13 @@ protected:
 
 public:
     TransH2DCETemplate(std::size_t iterations, bool affinitySrc)
-        : TransCETemplate{iterations, affinitySrc}
+        : TransStreamTemplate{iterations, affinitySrc}
     {
     }
+    std::string Name() const override { return "ce"; }
 };
 
-class TransH2DBatchCETemplate : public TransCETemplate {
+class TransH2DBatchCETemplate : public TransStreamTemplate {
 protected:
     std::size_t device_;
 
@@ -159,13 +160,13 @@ protected:
 
 public:
     TransH2DBatchCETemplate(std::size_t device, std::size_t iterations, bool affinitySrc)
-        : TransCETemplate{iterations, affinitySrc}, device_{device}
+        : TransStreamTemplate{iterations, affinitySrc}, device_{device}
     {
     }
     std::string Name() const override { return "batch-ce"; }
 };
 
-class TransD2HCETemplate : public TransCETemplate {
+class TransD2HCETemplate : public TransStreamTemplate {
 protected:
     void OnTransSubmit(TransTask& task) const override
     {
@@ -179,12 +180,13 @@ protected:
 
 public:
     TransD2HCETemplate(std::size_t iterations, bool affinitySrc)
-        : TransCETemplate{iterations, affinitySrc}
+        : TransStreamTemplate{iterations, affinitySrc}
     {
     }
+    std::string Name() const override { return "ce"; }
 };
 
-class TransD2HBatchCETemplate : public TransCETemplate {
+class TransD2HBatchCETemplate : public TransStreamTemplate {
 protected:
     std::size_t device_;
 
@@ -211,10 +213,53 @@ protected:
 
 public:
     TransD2HBatchCETemplate(std::size_t device, std::size_t iterations, bool affinitySrc)
-        : TransCETemplate{iterations, affinitySrc}, device_{device}
+        : TransStreamTemplate{iterations, affinitySrc}, device_{device}
     {
     }
     std::string Name() const override { return "batch-ce"; }
+};
+
+class TransSMTemplate : public TransStreamTemplate {
+protected:
+    std::size_t device_;
+    std::size_t number_;
+    void* dSrc_;
+    void* dDst_;
+
+    void OnTransSubmit(TransTask& task) const override
+    {
+        TRANS_ASSERT(task.src.size() <= number_);
+        const auto ptrSize = task.src.size() * sizeof(void*);
+        CUDA_ASSERT(cudaSetDevice(task.device));
+        CUDA_ASSERT(
+            cudaMemcpyAsync(dSrc_, task.src.data(), ptrSize, cudaMemcpyHostToDevice, task.stream));
+        CUDA_ASSERT(
+            cudaMemcpyAsync(dDst_, task.dst.data(), ptrSize, cudaMemcpyHostToDevice, task.stream));
+        CUDA_ASSERT(CudaSMTransBatchAsync(static_cast<void**>(dSrc_), static_cast<void**>(dDst_),
+                                          task.size, task.src.size(), task.stream));
+        CUDA_ASSERT(cudaEventRecord(task.finish, task.stream));
+    }
+
+public:
+    TransSMTemplate(std::size_t device, std::size_t num, std::size_t iterations, bool affinitySrc)
+        : TransStreamTemplate{iterations, affinitySrc},
+          device_{device},
+          number_{num},
+          dSrc_{nullptr},
+          dDst_{nullptr}
+    {
+        const auto ptrSize = num * sizeof(void*);
+        CUDA_ASSERT(cudaSetDevice(device));
+        CUDA_ASSERT(cudaMalloc(&dSrc_, ptrSize));
+        CUDA_ASSERT(cudaMalloc(&dDst_, ptrSize));
+    }
+    ~TransSMTemplate() override
+    {
+        CUDA_ASSERT(cudaSetDevice(device_));
+        if (dSrc_) { CUDA_ASSERT(cudaFree(dSrc_)); }
+        if (dDst_) { CUDA_ASSERT(cudaFree(dDst_)); }
+    }
+    std::string Name() const override { return "sm"; }
 };
 
 #endif

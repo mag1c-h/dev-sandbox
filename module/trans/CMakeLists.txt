@@ -5,6 +5,7 @@ if (CUDA_FOUND)
     target_sources(trans PRIVATE
         cuda/trans_runtime_cuda.cc
         cuda/trans_case_cuda.cc
+        cuda/trans_kernel_cuda.cu
     )
     target_link_libraries(trans PRIVATE CUDA::Runtime)
 elseif(ASCEND_FOUND)
