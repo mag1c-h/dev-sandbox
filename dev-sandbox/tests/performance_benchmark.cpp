@@ -1,11 +1,35 @@
+#ifdef USE_NPU
 #include <acl/acl.h>
+#else
+#include <cstddef>
+#include <cstdint>
+typedef int aclError;
+constexpr aclError ACL_SUCCESS = 0;
+constexpr int ACL_MEMCPY_HOST_TO_DEVICE = 1;
+constexpr int ACL_MEM_MALLOC_HUGE_FIRST = 0;
+typedef void* aclrtStream;
+inline aclError aclrtSetDevice(uint32_t) { return ACL_SUCCESS; }
+inline aclError aclrtCreateStream(aclrtStream*) { return ACL_SUCCESS; }
+inline void aclrtDestroyStream(aclrtStream) {}
+inline aclError aclrtMalloc(void**, size_t, int) { return ACL_SUCCESS; }
+inline void aclrtFree(void*) {}
+inline aclError aclrtMallocHost(void**, size_t) { return ACL_SUCCESS; }
+inline void aclrtFreeHost(void*) {}
+inline aclError aclrtSynchronizeStream(aclrtStream) { return ACL_SUCCESS; }
+inline aclError aclInit(void*) { return ACL_SUCCESS; }
+inline void aclFinalize() {}
+inline aclError aclrtResetDevice(uint32_t) { return ACL_SUCCESS; }
+#endif
+
 #include <vector>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
+#include <memory>
 
 #include "ffts_dispatcher_minimal.h"
+#include "simple_thread_pool.h"
 #include "three_stage_h2d_huge.h"
 
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);

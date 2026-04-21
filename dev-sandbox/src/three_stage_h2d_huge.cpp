@@ -1,10 +1,50 @@
 #include "three_stage_h2d_huge.h"
 #include "ffts_dispatcher_minimal.h"
+#include "simple_thread_pool.h"
+
+#ifdef USE_NPU
 #include <acl/acl.h>
 #include <runtime/dev.h>
+#else
+#include <cstdint>
+typedef int aclError;
+constexpr aclError ACL_SUCCESS = 0;
+constexpr int ACL_MEMCPY_HOST_TO_DEVICE = 1;
+constexpr int ACL_MEM_MALLOC_HUGE_FIRST = 0;
+typedef void* aclrtStream;
+typedef void* rtNotify_t;
+inline aclError aclrtSetDevice(uint32_t) { return ACL_SUCCESS; }
+inline aclError aclrtMalloc(void**, size_t, int) { return ACL_SUCCESS; }
+inline void aclrtFree(void*) {}
+inline aclError aclrtMemcpyAsync(void*, uint64_t, void*, uint64_t, int, aclrtStream) { return ACL_SUCCESS; }
+inline aclError aclrtSynchronizeStream(aclrtStream) { return ACL_SUCCESS; }
+inline int rtNotifyCreate(int32_t, rtNotify_t*) { return 0; }
+inline int rtNotifyDestroy(rtNotify_t) { return 0; }
+inline int rtNotifyWait(rtNotify_t, aclrtStream) { return 0; }
+inline int rtNotifyRecord(rtNotify_t, aclrtStream) { return 0; }
+#endif
+
 #include <vector>
 #include <cstring>
 #include <algorithm>
+#include <future>
+#include <atomic>
+
+struct HugeH2DTaskInfo {
+    size_t objectIndex;
+    void* hostPinPtr;
+    size_t objectSize;
+    std::vector<void*> deviceDestPtrs;
+    std::vector<size_t> blobSizes;
+    size_t blobCount;
+    size_t firstBlobOffset;
+};
+
+struct HugeH2DTaskQueue {
+    std::vector<HugeH2DTaskInfo> tasks;
+    bool IsEmpty() const { return tasks.empty(); }
+    void Clear() { tasks.clear(); }
+};
 
 int ThreeStageH2D_Huge(
     void** hostPinPtrs,
@@ -67,150 +107,178 @@ int ThreeStageH2D_Huge(
         }
     }
     
-    int rtRet = rtNotifyRecord(toDestDone[0], fftsStream);
-    if (rtRet != 0) {
-        rtRet = rtNotifyRecord(toDestDone[0], h2dStream);
-    }
-    rtRet = rtNotifyRecord(toDestDone[1], fftsStream);
-    if (rtRet != 0) {
-        rtRet = rtNotifyRecord(toDestDone[1], h2dStream);
+    dispatcher->CreateFftsCtxs(2);
+    
+    auto h2hThreadPool = dispatcher->GetH2hThreadPool();
+    auto h2dThreadPool = dispatcher->GetH2dThreadPool();
+    
+    if (!h2hThreadPool || !h2dThreadPool) {
+        for (int i = 0; i < 2; i++) {
+            rtNotifyDestroy(toPinDone[i]);
+            rtNotifyDestroy(toDestDone[i]);
+        }
+        aclrtFree(devicePinBuffers[0]);
+        aclrtFree(devicePinBuffers[1]);
+        return -1;
     }
     
     const size_t MAX_PARALLEL = 8;
     
-    for (size_t objIdx = 0; objIdx < objectCount; objIdx++) {
-        size_t slot = objIdx % 2;
-        
-        rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
-        if (rtRet != 0) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
-            }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return rtRet;
-        }
-        
-        aclRet = aclrtMemcpyAsync(
-            devicePinBuffers[slot], maxSize,
-            hostPinPtrs[objIdx], objectSizes[objIdx],
-            ACL_MEMCPY_HOST_TO_DEVICE, h2dStream);
-        if (aclRet != ACL_SUCCESS) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
-            }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return aclRet;
-        }
-        
-        rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
-        if (rtRet != 0) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
-            }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return rtRet;
-        }
-        
-        rtRet = rtNotifyWait(toPinDone[slot], fftsStream);
-        if (rtRet != 0) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
-            }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return rtRet;
-        }
-        
-        dispatcher->ReuseCtx(0);
-        
-        std::vector<int32_t> lastTaskId(MAX_PARALLEL, -1);
-        std::vector<uint32_t> taskIds(blobCounts[objIdx]);
-        
-        size_t blobStartIdx = blobOffsets[objIdx];
-        size_t offsetInPinBuffer = 0;
-        
-        for (size_t blobIdx = 0; blobIdx < blobCounts[objIdx]; blobIdx++) {
-            size_t globalBlobIdx = blobStartIdx + blobIdx;
-            void* src = static_cast<uint8_t*>(devicePinBuffers[slot]) + offsetInPinBuffer;
-            
-            int ret = dispatcher->MemcpyAsync(
-                deviceDestPtrs[globalBlobIdx],
-                src,
-                blobSizes[globalBlobIdx],
-                &taskIds[blobIdx]);
-            if (ret != 0) {
-                for (int i = 0; i < 2; i++) {
-                    rtNotifyDestroy(toPinDone[i]);
-                    rtNotifyDestroy(toDestDone[i]);
+    std::atomic<bool> errorFlag{false};
+    std::vector<std::future<void>> h2hFuts;
+    
+    std::atomic<size_t> finishCount{0};
+    std::atomic<size_t> processedCount{0};
+    std::atomic<bool> h2hAllDone{false};
+    
+    std::mutex queueMutex;
+    std::condition_variable queueCv;
+    HugeH2DTaskQueue readyQueue;
+    
+    auto h2dFut = h2dThreadPool->Submit([&]() {
+        while (true) {
+            HugeH2DTaskQueue tasks;
+            {
+                std::unique_lock<std::mutex> lock(queueMutex);
+                queueCv.wait(lock, [&]() {
+                    return !readyQueue.IsEmpty() || h2hAllDone.load();
+                });
+                
+                if (readyQueue.IsEmpty() && h2hAllDone.load()) {
+                    break;
                 }
-                aclrtFree(devicePinBuffers[0]);
-                aclrtFree(devicePinBuffers[1]);
-                return ret;
+                
+                std::swap(tasks, readyQueue);
             }
             
-            size_t chainIdx = blobIdx % MAX_PARALLEL;
-            if (lastTaskId[chainIdx] >= 0) {
-                dispatcher->AddTaskDependency(lastTaskId[chainIdx], taskIds[blobIdx]);
+            for (const auto& task : tasks.tasks) {
+                if (errorFlag.load()) break;
+                
+                size_t slot = task.objectIndex % 2;
+                
+                if (processedCount.load() >= 2) {
+                    int rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
+                    if (rtRet != 0) {
+                        errorFlag.store(true);
+                        break;
+                    }
+                }
+                
+                aclRet = aclrtMemcpyAsync(
+                    devicePinBuffers[slot], maxSize,
+                    task.hostPinPtr, task.objectSize,
+                    ACL_MEMCPY_HOST_TO_DEVICE, h2dStream);
+                if (aclRet != ACL_SUCCESS) {
+                    errorFlag.store(true);
+                    break;
+                }
+                
+                int rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
+                if (rtRet != 0) {
+                    errorFlag.store(true);
+                    break;
+                }
+                
+                rtRet = rtNotifyWait(toPinDone[slot], fftsStream);
+                if (rtRet != 0) {
+                    errorFlag.store(true);
+                    break;
+                }
+                
+                dispatcher->SetFftsCtx(slot);
+                dispatcher->ReuseCtx(slot);
+                
+                std::vector<int32_t> lastTaskId(MAX_PARALLEL, -1);
+                std::vector<uint32_t> taskIds(task.blobCount);
+                
+                size_t offsetInPinBuffer = 0;
+                
+                for (size_t blobIdx = 0; blobIdx < task.blobCount; blobIdx++) {
+                    size_t globalBlobIdx = task.firstBlobOffset + blobIdx;
+                    void* src = static_cast<uint8_t*>(devicePinBuffers[slot]) + offsetInPinBuffer;
+                    
+                    int ret = dispatcher->MemcpyAsync(
+                        task.deviceDestPtrs[globalBlobIdx],
+                        src,
+                        task.blobSizes[globalBlobIdx],
+                        &taskIds[blobIdx]);
+                    if (ret != 0) {
+                        errorFlag.store(true);
+                        break;
+                    }
+                    
+                    size_t chainIdx = blobIdx % MAX_PARALLEL;
+                    if (lastTaskId[chainIdx] >= 0) {
+                        dispatcher->AddTaskDependency(lastTaskId[chainIdx], taskIds[blobIdx]);
+                    }
+                    lastTaskId[chainIdx] = taskIds[blobIdx];
+                    
+                    offsetInPinBuffer += task.blobSizes[globalBlobIdx];
+                }
+                
+                if (errorFlag.load()) break;
+                
+                uint16_t readyCount = std::min(static_cast<size_t>(task.blobCount), MAX_PARALLEL);
+                dispatcher->LaunchFftsTask(fftsStream, readyCount, slot);
+                
+                dispatcher->ReuseCtx(slot);
+                
+                rtRet = rtNotifyRecord(toDestDone[slot], fftsStream);
+                if (rtRet != 0) {
+                    errorFlag.store(true);
+                    break;
+                }
+                
+                processedCount.fetch_add(1);
             }
-            lastTaskId[chainIdx] = taskIds[blobIdx];
+        }
+    });
+    
+    for (size_t objIdx = 0; objIdx < objectCount; objIdx++) {
+        h2hFuts.emplace_back(h2hThreadPool->Submit([&, objIdx]() {
+            size_t blobStartIdx = blobOffsets[objIdx];
+            size_t blobCount = blobCounts[objIdx];
             
-            offsetInPinBuffer += blobSizes[globalBlobIdx];
-        }
-        
-        uint16_t readyCount = std::min(static_cast<size_t>(blobCounts[objIdx]), MAX_PARALLEL);
-        int ret = dispatcher->LaunchFftsTask(fftsStream, readyCount, 0);
-        if (ret != 0) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
+            std::vector<void*> deviceDestPtrsForObj;
+            std::vector<size_t> blobSizesForObj;
+            
+            for (size_t blobIdx = 0; blobIdx < blobCount; blobIdx++) {
+                size_t globalBlobIdx = blobStartIdx + blobIdx;
+                deviceDestPtrsForObj.push_back(deviceDestPtrs[globalBlobIdx]);
+                blobSizesForObj.push_back(blobSizes[globalBlobIdx]);
             }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return ret;
-        }
-        
-        dispatcher->ReuseCtx(0);
-        
-        rtRet = rtNotifyRecord(toDestDone[slot], fftsStream);
-        if (rtRet != 0) {
-            for (int i = 0; i < 2; i++) {
-                rtNotifyDestroy(toPinDone[i]);
-                rtNotifyDestroy(toDestDone[i]);
+            
+            {
+                std::unique_lock<std::mutex> lock(queueMutex);
+                HugeH2DTaskInfo task;
+                task.objectIndex = objIdx;
+                task.hostPinPtr = hostPinPtrs[objIdx];
+                task.objectSize = objectSizes[objIdx];
+                task.deviceDestPtrs = deviceDestPtrsForObj;
+                task.blobSizes = blobSizesForObj;
+                task.blobCount = blobCount;
+                task.firstBlobOffset = blobStartIdx;
+                readyQueue.tasks.push_back(task);
+                finishCount.fetch_add(1);
             }
-            aclrtFree(devicePinBuffers[0]);
-            aclrtFree(devicePinBuffers[1]);
-            return rtRet;
-        }
+            queueCv.notify_one();
+        }));
     }
     
-    aclRet = aclrtSynchronizeStream(h2dStream);
-    if (aclRet != ACL_SUCCESS) {
-        for (int i = 0; i < 2; i++) {
-            rtNotifyDestroy(toPinDone[i]);
-            rtNotifyDestroy(toDestDone[i]);
-        }
-        aclrtFree(devicePinBuffers[0]);
-        aclrtFree(devicePinBuffers[1]);
-        return aclRet;
+    {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        h2hAllDone.store(true);
+    }
+    queueCv.notify_one();
+    
+    for (auto& f : h2hFuts) {
+        f.wait();
     }
     
-    aclRet = aclrtSynchronizeStream(fftsStream);
-    if (aclRet != ACL_SUCCESS) {
-        for (int i = 0; i < 2; i++) {
-            rtNotifyDestroy(toPinDone[i]);
-            rtNotifyDestroy(toDestDone[i]);
-        }
-        aclrtFree(devicePinBuffers[0]);
-        aclrtFree(devicePinBuffers[1]);
-        return aclRet;
-    }
+    h2dFut.wait();
+    
+    aclrtSynchronizeStream(h2dStream);
+    aclrtSynchronizeStream(fftsStream);
     
     for (int i = 0; i < 2; i++) {
         rtNotifyDestroy(toPinDone[i]);
@@ -219,5 +287,5 @@ int ThreeStageH2D_Huge(
     aclrtFree(devicePinBuffers[0]);
     aclrtFree(devicePinBuffers[1]);
     
-    return 0;
+    return errorFlag.load() ? -1 : 0;
 }

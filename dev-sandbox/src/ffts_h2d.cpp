@@ -1,6 +1,18 @@
 #include "ffts_dispatcher_minimal.h"
+
+#ifdef USE_NPU
 #include <acl/acl.h>
+#endif
+
+#include <cstdint>
 #include <vector>
+
+#ifndef USE_NPU
+typedef int aclError;
+constexpr aclError ACL_SUCCESS = 0;
+inline aclError aclrtSetDevice(uint32_t) { return ACL_SUCCESS; }
+inline aclError aclrtSynchronizeStream(void*) { return ACL_SUCCESS; }
+#endif
 
 extern int FftsH2D(
     void** hostPinPtrs,
@@ -41,7 +53,7 @@ int FftsH2D(
         lastTaskId[idx] = taskIds[i];
     }
     
-    uint16_t readyCount = (count < MAX_PARALLEL) ? count : MAX_PARALLEL;
+    uint16_t readyCount = (count < MAX_PARALLEL) ? static_cast<uint16_t>(count) : static_cast<uint16_t>(MAX_PARALLEL);
     int ret = dispatcher->LaunchFftsTask(stream, readyCount, 0);
     if (ret != 0) {
         return ret;

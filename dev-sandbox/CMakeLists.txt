@@ -24,8 +24,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Link directories
 link_directories(${CANN_ROOT}/lib64)
 
-# Enable NPU (Ascend) FFTS support
-add_compile_definitions(USE_NPU)
+# Enable NPU (Ascend) FFTS support (comment out if no CANN installed)
+# add_compile_definitions(USE_NPU)
 
 # Source files
 set(COMMON_SRC
@@ -39,11 +39,21 @@ set(COMMON_SRC
 
 # Feasibility test
 add_executable(feasibility_test tests/feasibility_test.cpp ${COMMON_SRC})
-target_link_libraries(feasibility_test ascendcl runtime pthread dl)
+
+# Link libraries based on USE_NPU
+if(DEFINED USE_NPU)
+    target_link_libraries(feasibility_test ascendcl runtime pthread dl)
+else()
+    target_link_libraries(feasibility_test pthread dl)
+endif()
 
 # Performance benchmark
 add_executable(performance_benchmark tests/performance_benchmark.cpp ${COMMON_SRC})
-target_link_libraries(performance_benchmark ascendcl runtime pthread dl)
+if(DEFINED USE_NPU)
+    target_link_libraries(performance_benchmark ascendcl runtime pthread dl)
+else()
+    target_link_libraries(performance_benchmark pthread dl)
+endif()
 
 # Enable testing
 enable_testing()

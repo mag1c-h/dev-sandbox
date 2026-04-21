@@ -1,11 +1,37 @@
+#ifdef USE_NPU
 #include <acl/acl.h>
+#endif
 #include <vector>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 
 #include "ffts_dispatcher_minimal.h"
+#include "simple_thread_pool.h"
 #include "three_stage_h2d_huge.h"
+
+#ifndef USE_NPU
+typedef int aclError;
+constexpr aclError ACL_SUCCESS = 0;
+constexpr int ACL_MEMCPY_HOST_TO_DEVICE = 1;
+constexpr int ACL_MEMCPY_DEVICE_TO_HOST = 2;
+constexpr int ACL_MEM_MALLOC_HUGE_FIRST = 0;
+typedef void* aclrtStream;
+aclError aclrtCreateStream(aclrtStream*) { return ACL_SUCCESS; }
+void aclrtDestroyStream(aclrtStream) {}
+aclError aclrtMalloc(void**, size_t, int) { return ACL_SUCCESS; }
+void aclrtFree(void*) {}
+aclError aclrtMallocHost(void**, size_t) { return ACL_SUCCESS; }
+void aclrtFreeHost(void*) {}
+aclError aclrtMemcpy(void*, size_t, void*, size_t, int) { return ACL_SUCCESS; }
+aclError aclrtSynchronizeStream(aclrtStream) { return ACL_SUCCESS; }
+aclError aclrtSetDevice(int) { return ACL_SUCCESS; }
+aclError aclrtResetDevice(int) { return ACL_SUCCESS; }
+aclError aclrtGetDevice(int*) { return ACL_SUCCESS; }
+aclError aclInit(void*) { return ACL_SUCCESS; }
+void aclFinalize() {}
+#endif
 
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);
 extern int AsyncPipelineH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream);
@@ -186,7 +212,7 @@ int TestFftsH2D() {
 }
 
 int TestThreeStage() {
-    printf("\n=== Testing Three Stage H2D (H2H+H2D+D2D) ===\n");
+    printf("\n=== Testing Three Stage H2D (Async Pipeline) ===\n");
     
     const size_t blobCount = 8;
     const size_t blobSize = 64 * 1024;
@@ -211,8 +237,13 @@ int TestThreeStage() {
     
     FftsDispatcherMinimal dispatcher;
     dispatcher.Init();
-    dispatcher.CreateFftsCtxs(1);
-    dispatcher.SetFftsCtx(0);
+    dispatcher.CreateFftsCtxs(2);
+    
+    auto h2hThreadPool = std::make_shared<SimpleThreadPool>(2);
+    auto h2dThreadPool = std::make_shared<SimpleThreadPool>(1);
+    
+    dispatcher.SetH2hThreadPool(h2hThreadPool);
+    dispatcher.SetH2dThreadPool(h2dThreadPool);
     
     int ret = ThreeStageH2D(hostRawPtrs.data(), devPtrs.data(), sizes.data(), blobCount, 0, h2dStream, fftsStream, &dispatcher);
     
@@ -228,8 +259,13 @@ int TestThreeStage() {
         }
     }
     
-    PrintResult("Three stage H2D", success);
+    PrintResult("Three stage H2D (async pipeline)", success);
+    if (success) {
+        printf("  🎉 Async pipeline works: H2H + H2D + FFTS overlapping!\n");
+    }
     
+    h2hThreadPool->Shutdown();
+    h2dThreadPool->Shutdown();
     aclrtDestroyStream(h2dStream);
     aclrtDestroyStream(fftsStream);
     for (size_t i = 0; i < blobCount; i++) {
@@ -241,7 +277,7 @@ int TestThreeStage() {
 }
 
 int TestThreeStageHuge() {
-    printf("\n=== Testing Three Stage H2D (HugeFFTS) ===\n");
+    printf("\n=== Testing Three Stage H2D (HugeFFTS Async) ===\n");
     
     const size_t objectCount = 3;
     const size_t blobsPerObject = 3;
@@ -275,8 +311,13 @@ int TestThreeStageHuge() {
     
     FftsDispatcherMinimal dispatcher;
     dispatcher.Init();
-    dispatcher.CreateFftsCtxs(1);
-    dispatcher.SetFftsCtx(0);
+    dispatcher.CreateFftsCtxs(2);
+    
+    auto h2hThreadPool = std::make_shared<SimpleThreadPool>(2);
+    auto h2dThreadPool = std::make_shared<SimpleThreadPool>(1);
+    
+    dispatcher.SetH2hThreadPool(h2hThreadPool);
+    dispatcher.SetH2dThreadPool(h2dThreadPool);
     
     int ret = ThreeStageH2D_Huge(
         hostPins.data(), devPtrs.data(),
@@ -301,11 +342,13 @@ int TestThreeStageHuge() {
         }
     }
     
-    PrintResult("Three stage H2D (HugeFFTS)", success);
+    PrintResult("Three stage H2D (HugeFFTS async)", success);
     if (success) {
-        printf("  🎉 Double-stream pipeline + FFTS scatter works!\n");
+        printf("  🎉 Async pipeline + multi-blob scatter works!\n");
     }
     
+    h2hThreadPool->Shutdown();
+    h2dThreadPool->Shutdown();
     aclrtDestroyStream(h2dStream);
     aclrtDestroyStream(fftsStream);
     for (size_t i = 0; i < objectCount; i++) {

@@ -1,8 +1,14 @@
 #ifndef THREE_STAGE_H2D_HUGE_H
 #define THREE_STAGE_H2D_HUGE_H
 
-#include <acl/acl.h>
+#include <cstddef>
 #include <cstdint>
+
+#ifdef USE_NPU
+#include <acl/acl.h>
+#else
+typedef void* aclrtStream;
+#endif
 
 class FftsDispatcherMinimal;
 
