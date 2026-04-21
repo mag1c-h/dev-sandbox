@@ -43,7 +43,6 @@ struct HugeH2DTaskInfo {
 struct HugeH2DTaskQueue {
     std::vector<HugeH2DTaskInfo> tasks;
     bool IsEmpty() const { return tasks.empty(); }
-    void Clear() { tasks.clear(); }
 };
 
 int ThreeStageH2D_Huge(
@@ -107,6 +106,19 @@ int ThreeStageH2D_Huge(
         }
     }
     
+    for (int i = 0; i < 2; i++) {
+        int rtRet = rtNotifyRecord(toDestDone[i], h2dStream);
+        if (rtRet != 0) {
+            for (int j = 0; j < 2; j++) {
+                rtNotifyDestroy(toPinDone[j]);
+                rtNotifyDestroy(toDestDone[j]);
+            }
+            aclrtFree(devicePinBuffers[0]);
+            aclrtFree(devicePinBuffers[1]);
+            return rtRet;
+        }
+    }
+    
     dispatcher->CreateFftsCtxs(2);
     
     auto h2hThreadPool = dispatcher->GetH2hThreadPool();
@@ -127,7 +139,6 @@ int ThreeStageH2D_Huge(
     std::atomic<bool> errorFlag{false};
     std::vector<std::future<void>> h2hFuts;
     
-    std::atomic<size_t> finishCount{0};
     std::atomic<size_t> processedCount{0};
     std::atomic<bool> h2hAllDone{false};
     
@@ -156,12 +167,10 @@ int ThreeStageH2D_Huge(
                 
                 size_t slot = task.objectIndex % 2;
                 
-                if (processedCount.load() >= 2) {
-                    int rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
-                    if (rtRet != 0) {
-                        errorFlag.store(true);
-                        break;
-                    }
+                int rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
+                if (rtRet != 0) {
+                    errorFlag.store(true);
+                    break;
                 }
                 
                 aclRet = aclrtMemcpyAsync(
@@ -173,7 +182,7 @@ int ThreeStageH2D_Huge(
                     break;
                 }
                 
-                int rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
+                rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
                 if (rtRet != 0) {
                     errorFlag.store(true);
                     break;
@@ -259,7 +268,6 @@ int ThreeStageH2D_Huge(
                 task.blobCount = blobCount;
                 task.firstBlobOffset = blobStartIdx;
                 readyQueue.tasks.push_back(task);
-                finishCount.fetch_add(1);
             }
             queueCv.notify_one();
         }));

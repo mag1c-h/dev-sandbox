@@ -27,6 +27,7 @@ inline int rtNotifyRecord(rtNotify_t, aclrtStream) { return 0; }
 
 #include <vector>
 #include <cstring>
+#include <algorithm>
 #include <future>
 #include <atomic>
 
@@ -54,30 +55,38 @@ int ThreeStageH2D(
     
     if (count == 0) return 0;
     
-    size_t totalSize = 0;
-    std::vector<size_t> offsets(count);
+    size_t maxSize = 0;
     for (size_t i = 0; i < count; i++) {
-        offsets[i] = totalSize;
-        totalSize += sizes[i];
+        maxSize = std::max(maxSize, sizes[i]);
     }
     
-    if (totalSize == 0) return 0;
+    if (maxSize == 0) return 0;
     
-    void* hostPinBuffer = nullptr;
-    aclError aclRet = aclrtMallocHost(&hostPinBuffer, totalSize);
-    if (aclRet != ACL_SUCCESS || hostPinBuffer == nullptr) {
-        return aclRet;
+    std::vector<void*> hostPinBuffers(count, nullptr);
+    for (size_t i = 0; i < count; i++) {
+        aclError aclRet = aclrtMallocHost(&hostPinBuffers[i], maxSize);
+        if (aclRet != ACL_SUCCESS || hostPinBuffers[i] == nullptr) {
+            for (size_t j = 0; j < i; j++) {
+                aclrtFreeHost(hostPinBuffers[j]);
+            }
+            return aclRet;
+        }
     }
     
     void* devicePinBuffers[2] = {nullptr, nullptr};
-    aclRet = aclrtMalloc(&devicePinBuffers[0], totalSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclError aclRet = aclrtMalloc(&devicePinBuffers[0], maxSize, ACL_MEM_MALLOC_HUGE_FIRST);
     if (aclRet != ACL_SUCCESS) {
-        aclrtFreeHost(hostPinBuffer);
+        for (size_t i = 0; i < count; i++) {
+            aclrtFreeHost(hostPinBuffers[i]);
+        }
         return aclRet;
     }
-    aclRet = aclrtMalloc(&devicePinBuffers[1], totalSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    
+    aclRet = aclrtMalloc(&devicePinBuffers[1], maxSize, ACL_MEM_MALLOC_HUGE_FIRST);
     if (aclRet != ACL_SUCCESS) {
-        aclrtFreeHost(hostPinBuffer);
+        for (size_t i = 0; i < count; i++) {
+            aclrtFreeHost(hostPinBuffers[i]);
+        }
         aclrtFree(devicePinBuffers[0]);
         return aclRet;
     }
@@ -92,7 +101,9 @@ int ThreeStageH2D(
                 rtNotifyDestroy(toPinDone[j]);
                 rtNotifyDestroy(toDestDone[j]);
             }
-            aclrtFreeHost(hostPinBuffer);
+            for (size_t k = 0; k < count; k++) {
+                aclrtFreeHost(hostPinBuffers[k]);
+            }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
             return rtRet;
@@ -104,7 +115,25 @@ int ThreeStageH2D(
                 rtNotifyDestroy(toPinDone[j]);
                 rtNotifyDestroy(toDestDone[j]);
             }
-            aclrtFreeHost(hostPinBuffer);
+            for (size_t k = 0; k < count; k++) {
+                aclrtFreeHost(hostPinBuffers[k]);
+            }
+            aclrtFree(devicePinBuffers[0]);
+            aclrtFree(devicePinBuffers[1]);
+            return rtRet;
+        }
+    }
+    
+    for (int i = 0; i < 2; i++) {
+        int rtRet = rtNotifyRecord(toDestDone[i], h2dStream);
+        if (rtRet != 0) {
+            for (int j = 0; j < 2; j++) {
+                rtNotifyDestroy(toPinDone[j]);
+                rtNotifyDestroy(toDestDone[j]);
+            }
+            for (size_t k = 0; k < count; k++) {
+                aclrtFreeHost(hostPinBuffers[k]);
+            }
             aclrtFree(devicePinBuffers[0]);
             aclrtFree(devicePinBuffers[1]);
             return rtRet;
@@ -121,7 +150,9 @@ int ThreeStageH2D(
             rtNotifyDestroy(toPinDone[i]);
             rtNotifyDestroy(toDestDone[i]);
         }
-        aclrtFreeHost(hostPinBuffer);
+        for (size_t i = 0; i < count; i++) {
+            aclrtFreeHost(hostPinBuffers[i]);
+        }
         aclrtFree(devicePinBuffers[0]);
         aclrtFree(devicePinBuffers[1]);
         return -1;
@@ -130,7 +161,6 @@ int ThreeStageH2D(
     std::atomic<bool> errorFlag{false};
     std::vector<std::future<void>> h2hFuts;
     
-    std::atomic<size_t> finishCount{0};
     std::atomic<size_t> processedCount{0};
     std::atomic<bool> h2hAllDone{false};
     
@@ -159,24 +189,22 @@ int ThreeStageH2D(
                 
                 size_t slot = task.index % 2;
                 
-                if (processedCount.load() >= 2) {
-                    int rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
-                    if (rtRet != 0) {
-                        errorFlag.store(true);
-                        break;
-                    }
+                int rtRet = rtNotifyWait(toDestDone[slot], h2dStream);
+                if (rtRet != 0) {
+                    errorFlag.store(true);
+                    break;
                 }
                 
                 aclRet = aclrtMemcpyAsync(
-                    devicePinBuffers[slot], totalSize,
-                    task.hostPinPtr, task.size,
+                    devicePinBuffers[slot], maxSize,
+                    hostPinBuffers[task.index], task.size,
                     ACL_MEMCPY_HOST_TO_DEVICE, h2dStream);
                 if (aclRet != ACL_SUCCESS) {
                     errorFlag.store(true);
                     break;
                 }
                 
-                int rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
+                rtRet = rtNotifyRecord(toPinDone[slot], h2dStream);
                 if (rtRet != 0) {
                     errorFlag.store(true);
                     break;
@@ -217,18 +245,16 @@ int ThreeStageH2D(
     
     for (size_t i = 0; i < count; i++) {
         h2hFuts.emplace_back(h2hThreadPool->Submit([&, i]() {
-            void* dst = static_cast<uint8_t*>(hostPinBuffer) + offsets[i];
-            std::memcpy(dst, hostRawPtrs[i], sizes[i]);
+            std::memcpy(hostPinBuffers[i], hostRawPtrs[i], sizes[i]);
             
             {
                 std::unique_lock<std::mutex> lock(queueMutex);
                 H2DTaskInfo task;
                 task.index = i;
-                task.hostPinPtr = dst;
+                task.hostPinPtr = hostPinBuffers[i];
                 task.size = sizes[i];
                 task.deviceDestPtr = deviceDestPtrs[i];
                 readyQueue.tasks.push_back(task);
-                finishCount.fetch_add(1);
             }
             queueCv.notify_one();
         }));
@@ -253,7 +279,9 @@ int ThreeStageH2D(
         rtNotifyDestroy(toPinDone[i]);
         rtNotifyDestroy(toDestDone[i]);
     }
-    aclrtFreeHost(hostPinBuffer);
+    for (size_t i = 0; i < count; i++) {
+        aclrtFreeHost(hostPinBuffers[i]);
+    }
     aclrtFree(devicePinBuffers[0]);
     aclrtFree(devicePinBuffers[1]);
     
