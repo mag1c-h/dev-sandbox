@@ -211,3 +211,29 @@ DEFINE_TRANS_D2H_CASE("trans from device(normal) to host(registered) with `ms_48
     }
     result.Show("[D2H] " + brief);
 }
+
+DEFINE_TRANS_H2D_CASE("trans from host(normal) to device(normal) with `dma`", normal, normal, dma,
+                      ctx)
+{
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransHostNormalBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransDeviceNormalBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransH2DDmaTemplate transTemplate{device, ctx.size, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[H2D] " + brief);
+}
+
+DEFINE_TRANS_H2D_CASE("trans from host(registered) to device(normal) with `dma`", registered,
+                      normal, dma, ctx)
+{
+    TransResult result;
+    for (std::size_t device = 0; device < ctx.nDevice; device++) {
+        TransHostRegisteredBuffer srcBuffer{device, ctx.size, ctx.num};
+        TransDeviceNormalBuffer dstBuffer{device, ctx.size, ctx.num};
+        TransH2DDmaTemplate transTemplate{device, ctx.size, ctx.iter, false};
+        result.Push(transTemplate.TransOne(&srcBuffer, &dstBuffer));
+    }
+    result.Show("[H2D] " + brief);
+}

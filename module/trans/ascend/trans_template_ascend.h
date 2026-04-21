@@ -25,6 +25,7 @@
 #define TRANS_TEMPLATE_ASCEND_H
 
 #include "trans_assert_ascend.h"
+#include "trans_dma_dispatcher_ascend.h"
 #include "trans_stopwatch.h"
 #include "trans_template.h"
 
@@ -295,6 +296,128 @@ public:
         : TransMultiStreamTemplate{streamCount, iterations, affinitySrc}
     {
     }
+};
+
+class TransH2DDmaTemplate : public TransTemplate {
+protected:
+    static constexpr std::size_t DMA_PARALLEL = 8;
+    static constexpr std::size_t MAX_NBLOB_PER_OBJ = DMA_PARALLEL * 2;
+    static constexpr std::size_t PIPE_SLOT_NUM = 2;
+    struct Object {
+        std::vector<void*> blobs;
+        std::size_t size;
+        void* pinBuffer;
+    };
+    std::size_t device_;
+    std::size_t size_;
+    std::unique_ptr<TransDmaDispatcher> dispatcher_;
+    aclrtStream h2dStream_;
+    aclrtStream dmaStream_;
+    void* deviceBuffer_[PIPE_SLOT_NUM];
+    rtNotify_t toPinDone_[PIPE_SLOT_NUM];
+    rtNotify_t toDestDone_[PIPE_SLOT_NUM];
+    std::vector<Object> objects_;
+
+    void OnTransPre(const std::vector<const TransBuffer*>& srcBuffers,
+                    const std::vector<const TransBuffer*>& dstBuffers) override
+    {
+        ASCEND_ASSERT(aclrtSetDevice(device_));
+        for (std::size_t i = 0; i < srcBuffers.size(); i++) {
+            auto& srcBuffer = *(srcBuffers[i]);
+            auto& dstBuffer = *(dstBuffers[i]);
+            std::size_t offset = 0;
+            while (offset < srcBuffer.Number()) {
+                auto left = srcBuffer.Number() - offset;
+                auto nBlob = std::min(left, MAX_NBLOB_PER_OBJ);
+                Object obj;
+                obj.size = srcBuffer.Size();
+                ASCEND_ASSERT(aclrtMallocHost(&obj.pinBuffer, obj.size * nBlob));
+                for (std::size_t j = 0; j < nBlob; j++, offset++) {
+                    std::memcpy(static_cast<char*>(obj.pinBuffer) + obj.size * j, srcBuffer[offset],
+                                obj.size);
+                    obj.blobs[j] = dstBuffer[offset];
+                }
+                objects_.push_back(std::move(obj));
+            }
+        }
+    }
+    std::pair<size_t, size_t> OnTrans() override
+    {
+        TransStopwatch submit, trans;
+        ASCEND_ASSERT(aclrtSetDevice(device_));
+        for (std::size_t i = 0; i < PIPE_SLOT_NUM; i++) {
+            ASCEND_ASSERT(rtNotifyRecord(toDestDone_[i], dmaStream_));
+        }
+        const auto objNumber = objects_.size();
+        for (std::size_t objIdx = 0; objIdx < objNumber; objIdx++) {
+            const auto& obj = objects_[objIdx];
+            const auto slot = objIdx % PIPE_SLOT_NUM;
+            const auto objTotalSize = obj.size * obj.blobs.size();
+            ASCEND_ASSERT(rtNotifyWait(toDestDone_[slot], h2dStream_));
+            ASCEND_ASSERT(aclrtMemcpyAsync(deviceBuffer_[slot], objTotalSize, obj.pinBuffer,
+                                           objTotalSize, ACL_MEMCPY_HOST_TO_DEVICE, h2dStream_));
+            ASCEND_ASSERT(rtNotifyRecord(toPinDone_[slot], h2dStream_));
+            ASCEND_ASSERT(rtNotifyWait(toPinDone_[slot], dmaStream_));
+            dispatcher_->ReuseCtx(0);
+            std::vector<std::size_t> lastTaskId(DMA_PARALLEL, std::size_t(-1));
+            std::vector<std::size_t> taskIds(obj.blobs.size());
+            size_t offsetInPinBuffer = 0;
+            for (size_t blobIdx = 0; blobIdx < obj.blobs.size(); blobIdx++) {
+                void* src = static_cast<uint8_t*>(deviceBuffer_[slot]) + offsetInPinBuffer;
+                std::size_t taskId = 0;
+                dispatcher_->MemcpyAsync(obj.blobs[blobIdx], src, obj.size, &taskId);
+                size_t chainIdx = blobIdx % DMA_PARALLEL;
+                if (lastTaskId[chainIdx] != std::size_t(-1)) {
+                    dispatcher_->AddTaskDependency(lastTaskId[chainIdx], taskId);
+                }
+                lastTaskId[chainIdx] = taskId;
+                offsetInPinBuffer += obj.size;
+            }
+            auto readyCount = std::min(obj.blobs.size(), DMA_PARALLEL);
+            dispatcher_->LaunchDmaTask(dmaStream_, readyCount, 0);
+            ASCEND_ASSERT(rtNotifyRecord(toDestDone_[slot], dmaStream_));
+        }
+        auto submitCost = submit.Elapse();
+        ASCEND_ASSERT(aclrtSynchronizeStream(h2dStream_));
+        ASCEND_ASSERT(aclrtSynchronizeStream(dmaStream_));
+        auto transCost = trans.Elapse();
+        return {transCost, submitCost};
+    }
+    void OnTransPost() override
+    {
+        ASCEND_ASSERT(aclrtSetDevice(device_));
+        for (auto& obj : objects_) { ASCEND_ASSERT(aclrtFreeHost(obj.pinBuffer)); }
+    }
+
+public:
+    TransH2DDmaTemplate(std::size_t device, std::size_t size, std::size_t iterations,
+                        bool affinitySrc)
+        : TransTemplate{iterations, affinitySrc}, device_{device}, size_{size}
+    {
+        const auto maxObjSize = size_ * MAX_NBLOB_PER_OBJ;
+        dispatcher_ = std::make_unique<TransDmaDispatcher>(device);
+        dispatcher_->CreateDmaCtxs(1);
+        dispatcher_->SetDmaCtx(0);
+        ASCEND_ASSERT(aclrtCreateStream(&h2dStream_));
+        ASCEND_ASSERT(aclrtCreateStream(&dmaStream_));
+        for (std::size_t i = 0; i < PIPE_SLOT_NUM; i++) {
+            ASCEND_ASSERT(aclrtMalloc(&deviceBuffer_[i], maxObjSize, ACL_MEM_MALLOC_HUGE_FIRST));
+            ASCEND_ASSERT(rtNotifyCreate(device, &toPinDone_[i]));
+            ASCEND_ASSERT(rtNotifyCreate(device, &toDestDone_[i]));
+        }
+    }
+    ~TransH2DDmaTemplate()
+    {
+        ASCEND_ASSERT(aclrtSetDevice(device_));
+        ASCEND_ASSERT(aclrtDestroyStream(h2dStream_));
+        ASCEND_ASSERT(aclrtDestroyStream(dmaStream_));
+        for (std::size_t i = 0; i < PIPE_SLOT_NUM; i++) {
+            ASCEND_ASSERT(aclrtFree(deviceBuffer_[i]));
+            ASCEND_ASSERT(rtNotifyDestroy(toPinDone_[i]));
+            ASCEND_ASSERT(rtNotifyDestroy(toDestDone_[i]));
+        }
+    }
+    std::string Name() const override { return "dma"; }
 };
 
 #endif
