@@ -45,7 +45,7 @@ public:
     void SetDmaCtx(std::size_t index);
     void MemcpyAsync(void* dst, const void* src, std::size_t size, std::size_t* taskId);
     void AddTaskDependency(std::size_t predecessorId, std::size_t successorId);
-    void LaunchDmaTask(aclrtStream stream, std::size_t readyCount, std::size_t ctxIndex);
+    void LaunchDmaTask(aclrtStream stream, std::size_t readyCount);
     void ReuseCtx(std::size_t index);
 };
 

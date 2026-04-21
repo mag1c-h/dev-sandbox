@@ -78,8 +78,7 @@ void TransDmaDispatcher::AddTaskDependency(std::size_t predecessorId, std::size_
     succCtx.predCnt++;
 }
 
-void TransDmaDispatcher::LaunchDmaTask(aclrtStream stream, std::size_t readyCount,
-                                       std::size_t ctxIndex)
+void TransDmaDispatcher::LaunchDmaTask(aclrtStream stream, std::size_t readyCount)
 {
     currentCtx_->ctxNum = currentCtx_->refreshIndex;
     if (currentCtx_->ctxNum == 0) { return; }

@@ -333,9 +333,9 @@ protected:
                 obj.size = srcBuffer.Size();
                 ASCEND_ASSERT(aclrtMallocHost(&obj.pinBuffer, obj.size * nBlob));
                 for (std::size_t j = 0; j < nBlob; j++, offset++) {
-                    std::memcpy(static_cast<char*>(obj.pinBuffer) + obj.size * j, srcBuffer[offset],
-                                obj.size);
-                    obj.blobs[j] = dstBuffer[offset];
+                    auto dst = static_cast<char*>(obj.pinBuffer) + obj.size * j;
+                    std::memcpy(dst, srcBuffer[offset], obj.size);
+                    obj.blobs.emplace_back(dstBuffer[offset]);
                 }
                 objects_.push_back(std::move(obj));
             }
@@ -358,7 +358,8 @@ protected:
                                            objTotalSize, ACL_MEMCPY_HOST_TO_DEVICE, h2dStream_));
             ASCEND_ASSERT(rtNotifyRecord(toPinDone_[slot], h2dStream_));
             ASCEND_ASSERT(rtNotifyWait(toPinDone_[slot], dmaStream_));
-            dispatcher_->ReuseCtx(0);
+            dispatcher_->SetDmaCtx(slot);
+            dispatcher_->ReuseCtx(slot);
             std::vector<std::size_t> lastTaskId(DMA_PARALLEL, std::size_t(-1));
             std::vector<std::size_t> taskIds(obj.blobs.size());
             size_t offsetInPinBuffer = 0;
@@ -374,7 +375,7 @@ protected:
                 offsetInPinBuffer += obj.size;
             }
             auto readyCount = std::min(obj.blobs.size(), DMA_PARALLEL);
-            dispatcher_->LaunchDmaTask(dmaStream_, readyCount, 0);
+            dispatcher_->LaunchDmaTask(dmaStream_, readyCount);
             ASCEND_ASSERT(rtNotifyRecord(toDestDone_[slot], dmaStream_));
         }
         auto submitCost = submit.Elapse();
@@ -396,8 +397,7 @@ public:
     {
         const auto maxObjSize = size_ * MAX_NBLOB_PER_OBJ;
         dispatcher_ = std::make_unique<TransDmaDispatcher>(device);
-        dispatcher_->CreateDmaCtxs(1);
-        dispatcher_->SetDmaCtx(0);
+        dispatcher_->CreateDmaCtxs(PIPE_SLOT_NUM);
         ASCEND_ASSERT(aclrtCreateStream(&h2dStream_));
         ASCEND_ASSERT(aclrtCreateStream(&dmaStream_));
         for (std::size_t i = 0; i < PIPE_SLOT_NUM; i++) {
