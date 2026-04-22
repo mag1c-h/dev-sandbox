@@ -25,6 +25,7 @@
 #define TRANS_TEMPLATE_ASCEND_H
 
 #include "trans_assert_ascend.h"
+#include "trans_ffts_dispatcher.h"
 #include "trans_stopwatch.h"
 #include "trans_template.h"
 
@@ -295,6 +296,59 @@ public:
         : TransMultiStreamTemplate{streamCount, iterations, affinitySrc}
     {
     }
+};
+
+class TransH2DFftsTemplate : public TransTemplate {
+protected:
+    FftsDispatcherHandle dispatcher_{nullptr};
+    std::vector<void*> srcPtrs_;
+    std::vector<void*> dstPtrs_;
+    std::size_t size_;
+
+    void OnTransPre(const std::vector<const TransBuffer*>& srcBuffers,
+                    const std::vector<const TransBuffer*>& dstBuffers) override
+    {
+        TRANS_ASSERT(srcBuffers.size() == 1);
+        TRANS_ASSERT(dstBuffers.size() == 1);
+        const auto& srcBuffer = *(srcBuffers.front());
+        const auto& dstBuffer = *(dstBuffers.front());
+        const auto number = srcBuffer.Number();
+        TRANS_ASSERT(dstBuffer.Number() == number);
+        size_ = srcBuffer.Size();
+        TRANS_ASSERT(dstBuffer.Size() == size_);
+        srcPtrs_.reserve(number);
+        dstPtrs_.reserve(number);
+        for (std::size_t i = 0; i < number; i++) {
+            srcPtrs_.emplace_back(srcBuffer[i]);
+            dstPtrs_.emplace_back(dstBuffer[i]);
+        }
+    }
+    std::pair<size_t, size_t> OnTrans() override
+    {
+        TransStopwatch submit, trans;
+        TransSubmitH2DIo2FftsDispatcher(srcPtrs_.data(), dstPtrs_.data(), size_, srcPtrs_.size(),
+                                        dispatcher_);
+        auto submitCost = submit.Elapse();
+        TransSyncFftsDispatcher(dispatcher_);
+        auto transCost = trans.Elapse();
+        return {transCost, submitCost};
+    }
+    void OnTransPost() override
+    {
+        srcPtrs_.clear();
+        dstPtrs_.clear();
+    }
+
+public:
+    TransH2DFftsTemplate(std::size_t device, std::size_t iterations, bool affinitySrc)
+        : TransTemplate{iterations, affinitySrc}
+    {
+        constexpr std::size_t nH2HThreadInFfts = 2;
+        constexpr std::size_t nH2DThreadInFfts = 1;
+        dispatcher_ = TransMakeFftsDispatcher(device, nH2HThreadInFfts, nH2DThreadInFfts);
+    }
+    ~TransH2DFftsTemplate() override { TransReleaseFftsDispatcher(dispatcher_); }
+    std::string Name() const override { return "ffts"; }
 };
 
 #endif
