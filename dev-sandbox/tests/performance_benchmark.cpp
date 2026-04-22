@@ -35,7 +35,7 @@ inline aclError aclrtResetDevice(uint32_t) { return ACL_SUCCESS; }
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);
 extern int AsyncPipelineH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream);
 extern int FftsH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream, FftsDispatcherMinimal* dispatcher);
-extern int ThreeStageH2D(void** hostRawPtrs, void** deviceDestPtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream h2dStream, aclrtStream fftsStream, FftsDispatcherMinimal* dispatcher);
+extern int ThreeStageH2D(void** hostRawPtrs, void** deviceDestPtrs, size_t* blobSizes, size_t objectCount, uint32_t deviceId, aclrtStream h2dStream, aclrtStream fftsStream, FftsDispatcherMinimal* dispatcher);
 
 double CalculateBandwidth(size_t totalBytes, double seconds) {
     return (double)totalBytes / seconds / (1024.0 * 1024.0 * 1024.0);
@@ -145,14 +145,18 @@ void BenchmarkFftsH2D(const TestConfig& config, bool fftsSupported) {
 }
 
 void BenchmarkThreeStage(const TestConfig& config) {
-    std::vector<void*> hostRawPtrs(config.blobCount);
-    std::vector<void*> devPtrs(config.blobCount);
-    std::vector<size_t> sizes(config.blobCount, config.blobSize);
+    constexpr size_t BLOBS_PER_OBJECT = 16;
+    size_t objectCount = config.blobCount;
+    size_t totalBlobCount = objectCount * BLOBS_PER_OBJECT;
     
-    for (size_t i = 0; i < config.blobCount; i++) {
-        hostRawPtrs[i] = std::malloc(config.blobSize);
-        std::memset(hostRawPtrs[i], 'E' + i, config.blobSize);
-        aclrtMalloc(&devPtrs[i], config.blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    std::vector<void*> hostRawPtrs(totalBlobCount);
+    std::vector<void*> devPtrs(totalBlobCount);
+    std::vector<size_t> blobSizes(totalBlobCount, config.blobSize);
+    
+    for (size_t blobIdx = 0; blobIdx < totalBlobCount; blobIdx++) {
+        hostRawPtrs[blobIdx] = std::malloc(config.blobSize);
+        std::memset(hostRawPtrs[blobIdx], 'E' + blobIdx % 26, config.blobSize);
+        aclrtMalloc(&devPtrs[blobIdx], config.blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
     }
     
     aclrtStream h2dStream, fftsStream;
@@ -161,26 +165,32 @@ void BenchmarkThreeStage(const TestConfig& config) {
     
     FftsDispatcherMinimal dispatcher;
     dispatcher.Init();
-    dispatcher.CreateFftsCtxs(1);
-    dispatcher.SetFftsCtx(0);
+    dispatcher.CreateFftsCtxs(2);
+    
+    auto h2hThreadPool = std::make_shared<SimpleThreadPool>(2);
+    auto h2dThreadPool = std::make_shared<SimpleThreadPool>(1);
+    dispatcher.SetH2hThreadPool(h2hThreadPool);
+    dispatcher.SetH2dThreadPool(h2dThreadPool);
     
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = ThreeStageH2D(hostRawPtrs.data(), devPtrs.data(), sizes.data(), config.blobCount, 0, h2dStream, fftsStream, &dispatcher);
+    int ret = ThreeStageH2D(hostRawPtrs.data(), devPtrs.data(), blobSizes.data(), objectCount, 0, h2dStream, fftsStream, &dispatcher);
     auto end = std::chrono::high_resolution_clock::now();
     
     double seconds = std::chrono::duration<double>(end - start).count();
-    size_t totalBytes = config.blobCount * config.blobSize;
+    size_t totalBytes = totalBlobCount * config.blobSize;
     double bandwidth = CalculateBandwidth(totalBytes, seconds);
     
-    printf("  3-Stage: %.2f GB/s", bandwidth);
+    printf("  3-Stage: %.2f GB/s (%zu objects, %zu blobs/object)", bandwidth, objectCount, BLOBS_PER_OBJECT);
     if (ret != 0) printf(" (failed: %d)", ret);
     printf("\n");
     
+    h2hThreadPool->Shutdown();
+    h2dThreadPool->Shutdown();
     aclrtDestroyStream(h2dStream);
     aclrtDestroyStream(fftsStream);
-    for (size_t i = 0; i < config.blobCount; i++) {
-        std::free(hostRawPtrs[i]);
-        aclrtFree(devPtrs[i]);
+    for (size_t blobIdx = 0; blobIdx < totalBlobCount; blobIdx++) {
+        std::free(hostRawPtrs[blobIdx]);
+        aclrtFree(devPtrs[blobIdx]);
     }
 }
 
@@ -216,8 +226,12 @@ void BenchmarkThreeStageHuge(const TestConfig& config) {
     
     FftsDispatcherMinimal dispatcher;
     dispatcher.Init();
-    dispatcher.CreateFftsCtxs(1);
-    dispatcher.SetFftsCtx(0);
+    dispatcher.CreateFftsCtxs(2);
+    
+    auto h2hThreadPool = std::make_shared<SimpleThreadPool>(2);
+    auto h2dThreadPool = std::make_shared<SimpleThreadPool>(1);
+    dispatcher.SetH2hThreadPool(h2hThreadPool);
+    dispatcher.SetH2dThreadPool(h2dThreadPool);
     
     auto start = std::chrono::high_resolution_clock::now();
     int ret = ThreeStageH2D_Huge(
@@ -231,10 +245,12 @@ void BenchmarkThreeStageHuge(const TestConfig& config) {
     size_t totalBytes = totalBlobs * config.blobSize;
     double bandwidth = CalculateBandwidth(totalBytes, seconds);
     
-    printf("  3-Stage-H: %.2f GB/s", bandwidth);
+    printf("  3-Stage-H: %.2f GB/s (%zu objects, %zu blobs/object)", bandwidth, objectCount, blobsPerObject);
     if (ret != 0) printf(" (failed: %d)", ret);
     printf("\n");
     
+    h2hThreadPool->Shutdown();
+    h2dThreadPool->Shutdown();
     aclrtDestroyStream(h2dStream);
     aclrtDestroyStream(fftsStream);
     for (size_t i = 0; i < objectCount; i++) {

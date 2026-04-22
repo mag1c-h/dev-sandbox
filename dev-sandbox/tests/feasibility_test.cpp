@@ -36,7 +36,7 @@ void aclFinalize() {}
 extern int DirectDiscreteH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId);
 extern int AsyncPipelineH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream);
 extern int FftsH2D(void** hostPinPtrs, void** devicePtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream stream, FftsDispatcherMinimal* dispatcher);
-extern int ThreeStageH2D(void** hostRawPtrs, void** deviceDestPtrs, size_t* sizes, size_t count, uint32_t deviceId, aclrtStream h2dStream, aclrtStream fftsStream, FftsDispatcherMinimal* dispatcher);
+extern int ThreeStageH2D(void** hostRawPtrs, void** deviceDestPtrs, size_t* blobSizes, size_t objectCount, uint32_t deviceId, aclrtStream h2dStream, aclrtStream fftsStream, FftsDispatcherMinimal* dispatcher);
 
 void PrintResult(const char* name, bool success) {
     if (success) {
@@ -214,21 +214,23 @@ int TestFftsH2D() {
 int TestThreeStage() {
     printf("\n=== Testing Three Stage H2D (Async Pipeline) ===\n");
     
-    const size_t blobCount = 8;
+    constexpr size_t BLOBS_PER_OBJECT = 16;
+    const size_t objectCount = 4;
     const size_t blobSize = 64 * 1024;
+    const size_t totalBlobCount = objectCount * BLOBS_PER_OBJECT;
     
-    std::vector<void*> hostRawPtrs(blobCount);
-    std::vector<void*> devPtrs(blobCount);
-    std::vector<size_t> sizes(blobCount, blobSize);
+    std::vector<void*> hostRawPtrs(totalBlobCount);
+    std::vector<void*> devPtrs(totalBlobCount);
+    std::vector<size_t> blobSizes(totalBlobCount, blobSize);
     
-    for (size_t i = 0; i < blobCount; i++) {
-        hostRawPtrs[i] = std::malloc(blobSize);
-        if (hostRawPtrs[i] == nullptr) return -1;
+    for (size_t blobIdx = 0; blobIdx < totalBlobCount; blobIdx++) {
+        hostRawPtrs[blobIdx] = std::malloc(blobSize);
+        if (hostRawPtrs[blobIdx] == nullptr) return -1;
         
-        aclError aclRet = aclrtMalloc(&devPtrs[i], blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclError aclRet = aclrtMalloc(&devPtrs[blobIdx], blobSize, ACL_MEM_MALLOC_HUGE_FIRST);
         if (aclRet != ACL_SUCCESS) return -1;
         
-        std::memset(hostRawPtrs[i], 'D' + i, blobSize);
+        std::memset(hostRawPtrs[blobIdx], 'D' + blobIdx % 26, blobSize);
     }
     
     aclrtStream h2dStream, fftsStream;
@@ -245,15 +247,17 @@ int TestThreeStage() {
     dispatcher.SetH2hThreadPool(h2hThreadPool);
     dispatcher.SetH2dThreadPool(h2dThreadPool);
     
-    int ret = ThreeStageH2D(hostRawPtrs.data(), devPtrs.data(), sizes.data(), blobCount, 0, h2dStream, fftsStream, &dispatcher);
+    int ret = ThreeStageH2D(hostRawPtrs.data(), devPtrs.data(), blobSizes.data(), objectCount, 0, h2dStream, fftsStream, &dispatcher);
     
     bool success = (ret == 0);
     if (success) {
-        for (size_t i = 0; i < blobCount; i++) {
+        for (size_t blobIdx = 0; blobIdx < totalBlobCount; blobIdx++) {
             std::vector<char> verify(blobSize);
-            aclrtMemcpy(verify.data(), blobSize, devPtrs[i], blobSize, ACL_MEMCPY_DEVICE_TO_HOST);
-            if (verify[0] != 'D' + i) {
+            aclrtMemcpy(verify.data(), blobSize, devPtrs[blobIdx], blobSize, ACL_MEMCPY_DEVICE_TO_HOST);
+            if (verify[0] != 'D' + blobIdx % 26) {
                 success = false;
+                printf("  ❌ Blob %zu verification failed: expected '%c', got '%c'\n", 
+                       blobIdx, static_cast<char>('D' + blobIdx % 26), verify[0]);
                 break;
             }
         }
@@ -262,15 +266,17 @@ int TestThreeStage() {
     PrintResult("Three stage H2D (async pipeline)", success);
     if (success) {
         printf("  🎉 Async pipeline works: H2H + H2D + FFTS overlapping!\n");
+        printf("     ObjectCount=%zu, BlobsPerObject=%zu, TotalBlobs=%zu\n", 
+               objectCount, BLOBS_PER_OBJECT, totalBlobCount);
     }
     
     h2hThreadPool->Shutdown();
     h2dThreadPool->Shutdown();
     aclrtDestroyStream(h2dStream);
     aclrtDestroyStream(fftsStream);
-    for (size_t i = 0; i < blobCount; i++) {
-        std::free(hostRawPtrs[i]);
-        aclrtFree(devPtrs[i]);
+    for (size_t blobIdx = 0; blobIdx < totalBlobCount; blobIdx++) {
+        std::free(hostRawPtrs[blobIdx]);
+        aclrtFree(devPtrs[blobIdx]);
     }
     
     return success ? 0 : -1;
