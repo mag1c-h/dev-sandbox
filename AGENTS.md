@@ -35,20 +35,36 @@ Do NOT remove this option or use `--as-needed`.
 
 Keys are `"src_type->dst_type:protocol_name"`. See `transfer/abstract/registry.h:92-96`.
 
-### Lock Optimization Pattern
+### Expected Pattern
 
-In `synchronize()` methods, tasks are extracted from the map inside the lock, then executed outside the lock. See `transfer/detail/local_file_2_local_file_sendfile.cc:113-127`.
+`Expected<T>` uses implicit constructors, NOT static factory methods. See `transfer/abstract/error.h:170-186`.
 
 ```cpp
-// Extract tasks (short lock)
+// Success - return value directly (auto-converts)
+Expected<std::unique_ptr<IStream>> create(...) {
+    if (!creator) {
+        return Error{ErrorCode::UnsupportedTransfer, "..."};  // failure
+    }
+    return stream;  // success, auto-converts
+}
+
+Expected<uint64_t> submit(...) {
+    return id;  // success, auto-converts
+}
+```
+
+### Lock Optimization Pattern
+
+In `synchronize()` methods, tasks are extracted from the map inside the lock, then executed outside the lock. See `transfer/detail/local_file_2_local_file_sendfile.cc:110-121`.
+
+```cpp
 std::vector<...> tasks;
 {
     std::lock_guard lock(mutex_);
-    // move tasks out
+    for (auto& [id, ti] : tasks_) { tasks.emplace_back(id, std::move(ti)); }
     tasks_.clear();
 }
-// Execute IO (no lock)
-for (auto& ti : tasks) { execute_task(ti); }
+for (auto& [id, ti] : tasks) { execute_task(ti); }  // IO outside lock
 ```
 
 ## Code Style
