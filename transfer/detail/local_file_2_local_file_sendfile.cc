@@ -23,6 +23,7 @@
  * */
 #include <fstream>
 #include <mutex>
+#include <tuple>
 #include <vector>
 #include "address/local_file.h"
 #include "protocol/sendfile.h"
@@ -46,16 +47,29 @@ public:
         dst_file_.close();
     }
 
-    Expected<void> submit(IoTask task) override
+    Expected<void> submit(uint64_t src, uint64_t dst, std::size_t size) override
     {
         if (!src_file_.is_open() || !dst_file_.is_open()) {
             return Error{ErrorCode::StreamClosed, "File streams not open"};
         }
 
-        if (task.ranges.empty()) { return Error{ErrorCode::InvalidTask, "IoTask ranges is empty"}; }
+        if (size == 0) { return Error{ErrorCode::InvalidTask, "Size is 0"}; }
 
         std::lock_guard<std::mutex> lock(mutex_);
-        tasks_.push_back(std::move(task));
+        ranges_.emplace_back(src, dst, size);
+        return Expected<void>();
+    }
+
+    Expected<void> submit(std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges) override
+    {
+        if (!src_file_.is_open() || !dst_file_.is_open()) {
+            return Error{ErrorCode::StreamClosed, "File streams not open"};
+        }
+
+        if (ranges.empty()) { return Error{ErrorCode::InvalidTask, "Ranges is empty"}; }
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& range : ranges) { ranges_.push_back(range); }
         return Expected<void>();
     }
 
@@ -65,43 +79,45 @@ public:
             return Error{ErrorCode::StreamClosed, "File streams not open"};
         }
 
-        std::vector<IoTask> tasks;
+        std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            tasks = std::move(tasks_);
-            tasks_.clear();
+            ranges = std::move(ranges_);
+            ranges_.clear();
         }
 
-        for (const auto& task : tasks) {
-            for (const auto& range : task.ranges) {
-                auto result = execute_range(range);
-                if (!result.ok()) { return result.error(); }
-            }
+        for (const auto& range : ranges) {
+            auto result = execute_range(range);
+            if (!result.ok()) { return result.error(); }
         }
 
         return Expected<void>();
     }
 
 private:
-    Expected<void> execute_range(const IoTask::Range& range)
+    Expected<void> execute_range(const std::tuple<uint64_t, uint64_t, std::size_t>& range)
     {
         if (!src_file_.is_open() || !dst_file_.is_open()) {
             return Error{ErrorCode::SourceNotFound, "File not open"};
         }
 
-        if (range.size == 0) { return Error{ErrorCode::InvalidTask, "Range size is 0"}; }
+        uint64_t src_offset = std::get<0>(range);
+        uint64_t dst_offset = std::get<1>(range);
+        std::size_t size = std::get<2>(range);
+
+        if (size == 0) { return Error{ErrorCode::InvalidTask, "Range size is 0"}; }
 
         std::vector<char> buffer(protocol_.chunk_size);
 
-        src_file_.seekg(range.src);
-        dst_file_.seekp(range.dst);
+        src_file_.seekg(src_offset);
+        dst_file_.seekp(dst_offset);
 
-        size_t remaining = range.size;
+        std::size_t remaining = size;
 
         while (remaining > 0 && !src_file_.eof() && src_file_.good() && dst_file_.good()) {
-            size_t to_read = std::min(remaining, protocol_.chunk_size);
+            std::size_t to_read = std::min(remaining, protocol_.chunk_size);
             src_file_.read(buffer.data(), to_read);
-            size_t read_bytes = src_file_.gcount();
+            std::size_t read_bytes = src_file_.gcount();
 
             if (read_bytes == 0) { break; }
 
@@ -130,7 +146,7 @@ private:
     std::ifstream src_file_;
     std::ofstream dst_file_;
 
-    std::vector<IoTask> tasks_;
+    std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges_;
     mutable std::mutex mutex_;
 };
 

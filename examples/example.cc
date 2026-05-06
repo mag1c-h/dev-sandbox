@@ -47,29 +47,22 @@ int main()
 
     auto stream = create_result.take_value();
 
-    auto r1 =
-        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 0, .dst = 0, .size = 10000}}});
+    auto r1 = stream->submit(0, 0, 10000);
     if (!r1) {
         std::cerr << "Submit task 1 failed: " << r1.error().message << std::endl;
         return 1;
     }
-    std::cout << "Submitted task 1" << std::endl;
+    std::cout << "Submitted single task: 0, 0, 10000" << std::endl;
 
-    auto r2 =
-        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 10000, .dst = 0, .size = 20000}}});
+    auto r2 = stream->submit({
+        {10000, 0, 20000},
+        {30000, 0, 10000}
+    });
     if (!r2) {
-        std::cerr << "Submit task 2 failed: " << r2.error().message << std::endl;
+        std::cerr << "Submit batch failed: " << r2.error().message << std::endl;
         return 1;
     }
-    std::cout << "Submitted task 2" << std::endl;
-
-    auto r3 =
-        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 30000, .dst = 0, .size = 10000}}});
-    if (!r3) {
-        std::cerr << "Submit task 3 failed: " << r3.error().message << std::endl;
-        return 1;
-    }
-    std::cout << "Submitted task 3" << std::endl;
+    std::cout << "Submitted batch: {10000, 0, 20000}, {30000, 0, 10000}" << std::endl;
 
     auto sync_result = stream->synchronize();
     if (!sync_result.ok()) {

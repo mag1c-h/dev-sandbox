@@ -24,25 +24,20 @@
 
 #pragma once
 
+#include <cstdint>
+#include <tuple>
 #include <vector>
 #include "address.h"
 #include "error.h"
 
 namespace ucm::transfer {
 
-struct IoTask {
-    struct Range {
-        uint64_t src;
-        uint64_t dst;
-        std::size_t size;
-    };
-    std::vector<Range> ranges;
-};
-
 class IStream {
 public:
     virtual ~IStream() = default;
-    virtual Expected<void> submit(IoTask task) = 0;
+    virtual Expected<void> submit(uint64_t src, uint64_t dst, std::size_t size) = 0;
+    virtual Expected<void> submit(
+        std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges) = 0;
     virtual Expected<void> synchronize() = 0;
 };
 
