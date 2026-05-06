@@ -388,7 +388,7 @@ stream->synchronize();
 
 - `synchronize(uint64_t task_id)`
 - **目的**：等待指定任务完成
-- **返回值**：`TaskResult`（包含传输字节数、错误信息）
+- **返回值**：`Expected<std::size_t>`（传输字节数或错误）
 - **语义**：阻塞等待直到任务完成
 - **约定**：任务完成后从队列移除
 
@@ -817,7 +817,7 @@ public:
     virtual Expected<uint64_t> submit(IoTask task) = 0;
 
     // 同步单个任务：
-    virtual TaskResult synchronize(uint64_t task_id) = 0;
+    virtual Expected<std::size_t> synchronize(uint64_t task_id) = 0;
 
     // 同步所有任务：
     virtual SyncResult synchronize() = 0;
@@ -1143,31 +1143,7 @@ task.size = 1024;      // 传输 1KB
 stream->submit(task);
 ```
 
-#### 3.7.2 TaskResult 定义
-
-TaskResult 是单任务结果：
-
-```cpp
-struct TaskResult {
-    uint64_t task_id = 0;          // 任务 ID
-    size_t bytes_transferred = 0;  // 已传输字节数
-    Error error;                   // 任务错误
-
-    bool ok() const { return error.ok(); }
-};
-
-// 使用：
-TaskResult result = stream->synchronize(task_id);
-if (!result.ok()) {
-    std::cerr << "Task " << result.task_id << " failed: "
-              << result.error.message << std::endl;
-} else {
-    std::cout << "Task " << result.task_id << " transferred "
-              << result.bytes_transferred << " bytes" << std::endl;
-}
-```
-
-#### 3.7.3 SyncResult 定义
+#### 3.7.2 SyncResult 定义
 
 SyncResult 是批量任务结果：
 
@@ -1513,10 +1489,9 @@ Expected<uint64_t> submit(IoTask task) override {
 #### 步骤 4：实现 synchronize 方法
 
 ```cpp
-TaskResult synchronize(uint64_t task_id) override {
+Expected<std::size_t> synchronize(uint64_t task_id) override {
     if (!open_) {
-        return TaskResult{task_id, 0,
-            Error{ErrorCode::StreamClosed, "Stream is closed"}};
+        return Error{ErrorCode::StreamClosed, "Stream is closed"};
     }
 
     task_internal ti;
@@ -1524,8 +1499,7 @@ TaskResult synchronize(uint64_t task_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = tasks_.find(task_id);
         if (it == tasks_.end()) {
-            return TaskResult{task_id, 0,
-                Error{ErrorCode::TaskNotFound, "Task not found"}};
+            return Error{ErrorCode::TaskNotFound, "Task not found"};
         }
         ti = std::move(it->second);
         tasks_.erase(it);
@@ -1533,7 +1507,7 @@ TaskResult synchronize(uint64_t task_id) override {
 
     execute_task(ti);  // 执行 HTTP 传输
 
-    return TaskResult{task_id, ti.bytes_transferred, ti.error};
+    return ti.bytes_transferred;
 }
 
 SyncResult synchronize() override {
@@ -1861,13 +1835,13 @@ int main() {
     std::cout << "Task submitted: " << task_id << std::endl;
 
     // 5. 同步等待
-    TaskResult task_result = stream->synchronize(task_id);
-    if (!task_result.ok()) {
-        std::cerr << "Task failed: " << task_result.error.message << std::endl;
+    auto sync_result = stream->synchronize(task_id);
+    if (!sync_result.ok()) {
+        std::cerr << "Task failed: " << sync_result.error().message << std::endl;
         return 1;
     }
 
-    std::cout << "Task succeeded: " << task_result.bytes_transferred
+    std::cout << "Task succeeded: " << sync_result.value()
               << " bytes transferred" << std::endl;
 
     // 6. 关闭 stream

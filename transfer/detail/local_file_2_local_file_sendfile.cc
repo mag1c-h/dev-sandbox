@@ -68,13 +68,9 @@ public:
         return id;
     }
 
-    TaskResult synchronize(uint64_t task_id) override
+    Expected<std::size_t> synchronize(uint64_t task_id) override
     {
-        if (!open_) {
-            return TaskResult{
-                .task_id = task_id, .error = Error{ErrorCode::StreamClosed, "Stream is closed"}
-            };
-        }
+        if (!open_) { return Error{ErrorCode::StreamClosed, "Stream is closed"}; }
 
         task_internal ti;
         {
@@ -82,11 +78,7 @@ public:
 
             auto it = tasks_.find(task_id);
             if (it == tasks_.end()) {
-                return TaskResult{
-                    .task_id = task_id,
-                    .error = Error{ErrorCode::TaskNotFound,
-                                   "Task not found: " + std::to_string(task_id)}
-                };
+                return Error{ErrorCode::TaskNotFound, "Task not found: " + std::to_string(task_id)};
             }
 
             ti = std::move(it->second);
@@ -95,8 +87,7 @@ public:
 
         execute_task(ti);
 
-        return TaskResult{
-            .task_id = task_id, .bytes_transferred = ti.bytes_transferred, .error = ti.error};
+        return ti.bytes_transferred;
     }
 
     SyncResult synchronize() override

@@ -76,14 +76,13 @@ int main()
 
     std::cout << "Pending tasks: " << stream->pending_count() << std::endl;
 
-    ucm::transfer::TaskResult result1 = stream->synchronize(id1);
-    std::cout << "Task " << result1.task_id << " completed: " << result1.bytes_transferred
-              << " bytes" << std::endl;
+    auto result1 = stream->synchronize(id1);
     if (!result1.ok()) {
-        std::cerr << "Error: " << result1.error.message << std::endl;
+        std::cerr << "Error: " << result1.error().message << std::endl;
         stream->close();
         return 1;
     }
+    std::cout << "Task " << id1 << " completed: " << result1.value() << " bytes" << std::endl;
 
     std::cout << "Pending tasks after sync(id1): " << stream->pending_count() << std::endl;
 

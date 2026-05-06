@@ -35,14 +35,6 @@ struct IoTask {
     std::size_t size;
 };
 
-struct TaskResult {
-    uint64_t task_id = 0;
-    std::size_t bytes_transferred = 0;
-    Error error;
-
-    bool ok() const { return error.ok(); }
-};
-
 struct SyncResult {
     std::size_t total_tasks = 0;
     std::size_t succeeded = 0;
@@ -58,7 +50,7 @@ class IStream {
 public:
     virtual ~IStream() = default;
     virtual Expected<uint64_t> submit(IoTask task) = 0;
-    virtual TaskResult synchronize(uint64_t task_id) = 0;
+    virtual Expected<std::size_t> synchronize(uint64_t task_id) = 0;
     virtual SyncResult synchronize() = 0;
     virtual void cancel() = 0;
     virtual void close() = 0;
