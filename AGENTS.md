@@ -77,7 +77,7 @@ for (const auto& range : ranges) { execute_range(range); }  // IO outside lock
 `.clang-format` uses Google base with:
 - IndentWidth: 4
 - ColumnLimit: 100
-- IncludeBlocks: Merge (system headers first, then project headers)
+- IncludeBlocks: Merge (main header first, then system headers `<...>`, then project headers `"..."`)
 - AfterFunction: true (brace on new line after function signature)
 
 Run formatter on all C++ changes:

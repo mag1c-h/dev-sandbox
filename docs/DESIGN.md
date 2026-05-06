@@ -1814,24 +1814,23 @@ if (!creator) {
 #### Include 顺序
 
 ```cpp
-// ✓ 推荐：Include 顺序
+// ✓ 推荐：Include 顺序（由 clang-format 自动排序）
 // 1. 对应头文件（如果是 .cc 文件）
 #include "transfer/detail/http_2_http_stream.h"
 
-// 2. 项目头文件
-#include "transfer/abstract/stream.h"
-#include "transfer/abstract/registry.h"
-#include "transfer/detail/address/http_address.h"
-
-// 3. 第三方库
+// 2. 系统头文件 <...>（Priority 2）
+#include <fstream>
 #include <memory>
-#include <string>
-#include <vector>
 #include <mutex>
+#include <string>
+#include <tuple>
+#include <vector>
 
-// 4. 系统头文件
-#include <cstdint>
-#include <cstring>
+// 3. 项目头文件 "..."（Priority 3）
+#include "address/local_file.h"
+#include "protocol/sendfile.h"
+#include "transfer/abstract/registry.h"
+#include "transfer/abstract/stream.h"
 ```
 
 ### 5.3 常见错误避免
