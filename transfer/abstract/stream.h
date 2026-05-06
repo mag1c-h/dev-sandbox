@@ -39,29 +39,11 @@ struct IoTask {
     std::vector<Range> ranges;
 };
 
-struct SyncResult {
-    std::size_t total_tasks = 0;
-    std::size_t succeeded = 0;
-    std::size_t failed = 0;
-    std::size_t bytes_total = 0;
-    Error first_error;
-    uint64_t first_failed_task_id = 0;
-
-    bool ok() const { return first_error.ok(); }
-};
-
 class IStream {
 public:
     virtual ~IStream() = default;
-    virtual Expected<uint64_t> submit(IoTask task) = 0;
-    virtual Expected<std::size_t> synchronize(uint64_t task_id) = 0;
-    virtual SyncResult synchronize() = 0;
-    virtual void cancel() = 0;
-    virtual void close() = 0;
-    virtual std::size_t pending_count() const = 0;
-    virtual bool is_open() const = 0;
-    virtual const AnyAddress& source() const = 0;
-    virtual const AnyAddress& destination() const = 0;
+    virtual Expected<void> submit(IoTask task) = 0;
+    virtual Expected<void> synchronize() = 0;
 };
 
 }  // namespace ucm::transfer

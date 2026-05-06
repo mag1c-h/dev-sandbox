@@ -185,4 +185,17 @@ public:
     const Error& error() const { return error_; }
 };
 
+template <>
+class Expected<void> {
+    Error error_;
+
+public:
+    Expected() : error_{} {}
+    Expected(Error error) : error_(std::move(error)) {}
+
+    bool ok() const { return error_.ok(); }
+    explicit operator bool() const { return ok(); }
+    const Error& error() const { return error_; }
+};
+
 }  // namespace ucm::transfer

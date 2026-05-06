@@ -51,60 +51,32 @@ int main()
         stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 0, .dst = 0, .size = 10000}}});
     if (!r1) {
         std::cerr << "Submit task 1 failed: " << r1.error().message << std::endl;
-        stream->close();
         return 1;
     }
-    uint64_t id1 = r1.take_value();
-    std::cout << "Submitted task " << id1 << std::endl;
+    std::cout << "Submitted task 1" << std::endl;
 
     auto r2 =
         stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 10000, .dst = 0, .size = 20000}}});
     if (!r2) {
         std::cerr << "Submit task 2 failed: " << r2.error().message << std::endl;
-        stream->close();
         return 1;
     }
-    uint64_t id2 = r2.take_value();
-    std::cout << "Submitted task " << id2 << std::endl;
+    std::cout << "Submitted task 2" << std::endl;
 
     auto r3 =
         stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 30000, .dst = 0, .size = 10000}}});
     if (!r3) {
         std::cerr << "Submit task 3 failed: " << r3.error().message << std::endl;
-        stream->close();
         return 1;
     }
-    uint64_t id3 = r3.take_value();
-    std::cout << "Submitted task " << id3 << std::endl;
+    std::cout << "Submitted task 3" << std::endl;
 
-    std::cout << "Pending tasks: " << stream->pending_count() << std::endl;
-
-    auto result1 = stream->synchronize(id1);
-    if (!result1.ok()) {
-        std::cerr << "Error: " << result1.error().message << std::endl;
-        stream->close();
-        return 1;
-    }
-    std::cout << "Task " << id1 << " completed: " << result1.value() << " bytes" << std::endl;
-
-    std::cout << "Pending tasks after sync(id1): " << stream->pending_count() << std::endl;
-
-    ucm::transfer::SyncResult sync_result = stream->synchronize();
-    std::cout << "Sync completed: " << sync_result.total_tasks << " tasks"
-              << ", " << sync_result.succeeded << " succeeded"
-              << ", " << sync_result.bytes_total << " bytes" << std::endl;
-
+    auto sync_result = stream->synchronize();
     if (!sync_result.ok()) {
-        std::cerr << "Error in task " << sync_result.first_failed_task_id << ": "
-                  << sync_result.first_error.message << std::endl;
-        stream->close();
+        std::cerr << "Synchronize failed: " << sync_result.error().message << std::endl;
         return 1;
     }
-
-    std::cout << "Pending tasks after sync(): " << stream->pending_count() << std::endl;
-
-    stream->close();
-    std::cout << "Stream closed" << std::endl;
+    std::cout << "Synchronize completed successfully" << std::endl;
 
     std::ifstream check_dst(test_dst, std::ios::binary);
     check_dst.seekg(0, std::ios::end);
