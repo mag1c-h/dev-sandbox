@@ -37,7 +37,7 @@ Keys are `"src_type->dst_type:protocol_name"`. See `transfer/abstract/registry.h
 
 ### Expected Pattern
 
-`Expected<T>` uses implicit constructors, NOT static factory methods. See `transfer/abstract/error.h:170-186`.
+`Expected<T>` uses implicit constructors, NOT static factory methods. See `transfer/abstract/error.h:170-188`.
 
 ```cpp
 // Success - return value directly (auto-converts)
@@ -48,23 +48,28 @@ Expected<std::unique_ptr<IStream>> create(...) {
     return stream;  // success, auto-converts
 }
 
-Expected<uint64_t> submit(...) {
-    return id;  // success, auto-converts
+// Expected<void> for submit/synchronize
+Expected<void> submit(...) {
+    if (size == 0) {
+        return Error{ErrorCode::InvalidTask, "Size is 0"};
+    }
+    ranges_.emplace_back(src, dst, size);
+    return Expected<void>();  // success
 }
 ```
 
 ### Lock Optimization Pattern
 
-In `synchronize()` methods, tasks are extracted from the map inside the lock, then executed outside the lock. See `transfer/detail/local_file_2_local_file_sendfile.cc:110-121`.
+In `synchronize()` methods, ranges are extracted from the vector inside the lock, then executed outside the lock. See `transfer/detail/local_file_2_local_file_sendfile.cc:65-78`.
 
 ```cpp
-std::vector<...> tasks;
+std::vector<std::tuple<...>> ranges;
 {
-    std::lock_guard lock(mutex_);
-    for (auto& [id, ti] : tasks_) { tasks.emplace_back(id, std::move(ti)); }
-    tasks_.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
+    ranges = std::move(ranges_);
+    ranges_.clear();
 }
-for (auto& [id, ti] : tasks) { execute_task(ti); }  // IO outside lock
+for (const auto& range : ranges) { execute_range(range); }  // IO outside lock
 ```
 
 ## Code Style

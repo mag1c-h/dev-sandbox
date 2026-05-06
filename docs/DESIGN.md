@@ -131,8 +131,8 @@ Transfer 采用五层架构设计，每层职责清晰：
                       ↓ invokes Creator function
 ┌─────────────────────────────────────────────────┐
 │  Implementation Layer (IStream)                 │
-│  - submit(IoTask) → 返回 task_id                │
-│  - synchronize(task_id) → 执行单个任务           │
+│  - submit(src, dst, size) → 单个提交             │
+│  - submit(vector<tuple>) → 批量提交              │
 │  - synchronize() → 执行所有任务                  │
 │  - 任务队列管理 + IO 执行                        │
 └─────────────────────┬───────────────────────────┘
@@ -371,63 +371,47 @@ stream->synchronize();
 
 #### 2.4.1 Submit 语义
 
-`submit(IoTask task)` 方法的语义约定：
+**单个提交**：
 
-- **目的**：提交异步传输任务
-- **返回值**：
-  - 成功：返回 `uint64_t` task_id（唯一标识符）
-  - 失败：返回 `Error`（如 StreamClosed）
-- **语义**：任务提交立即返回，不阻塞；实际传输在后台完成，调用 synchronize 时完成结果同步
-- **约定**：task_id 在 stream 生命周期内唯一
+- `submit(uint64_t src, uint64_t dst, std::size_t size)`
+- **目的**：提交单个传输任务
+- **参数**：
+  - `src`：源地址偏移（字节）
+  - `dst`：目标地址偏移（字节）
+  - `size`：传输大小（字节）
+- **返回值**：`Expected<void>`（成功或错误）
+- **语义**：任务入队，立即返回；实际传输在 synchronize 时执行
+- **约定**：size 为 0 返回 `ErrorCode::InvalidTask`
+
+**批量提交**：
+
+- `submit(std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges)`
+- **目的**：提交多个传输任务
+- **参数**：vector of tuple<src, dst, size>
+- **返回值**：`Expected<void>`
+- **语义**：所有 ranges 入队，立即返回
+- **约定**：空 vector 返回 `ErrorCode::InvalidTask`
+
+**使用示例**：
+
+```cpp
+// 单个提交
+stream->submit(0, 0, 1024);
+
+// 批量提交
+stream->submit({
+    {0, 0, 500},
+    {500, 1000, 500}
+});
+```
 
 #### 2.4.2 Synchronize 语义
 
-`synchronize()` 有两种形式：
-
-**单任务 synchronize**：
-
-- `synchronize(uint64_t task_id)`
-- **目的**：等待指定任务完成
-- **返回值**：`Expected<std::size_t>`（传输字节数或错误）
-- **语义**：阻塞等待直到任务完成
-- **约定**：任务完成后从队列移除
-
-**批量 synchronize**：
-
 - `synchronize()`
-- **目的**：等待所有待处理任务完成
-- **返回值**：`SyncResult`（统计信息、第一个错误）
-- **语义**：批量执行所有任务并等待完成
-- **约定**：返回后队列清空
-
-#### 2.4.3 其他接口语义
-
-**cancel()**：
-
-- **目的**：取消所有待处理任务
-- **语义**：标记任务为取消状态，不执行传输
-- **约定**：已取消任务在 synchronize 时返回 Cancelled 错误
-
-**close()**：
-
-- **目的**：关闭流，释放资源
-- **语义**：停止接收新任务，清理待处理任务
-- **约定**：close 后所有操作返回 StreamClosed 错误
-
-**is_open()**：
-
-- **目的**：检查流是否处于打开状态
-- **语义**：返回当前流的状态
-
-**pending_count()**：
-
-- **目的**：获取待处理任务数量
-- **语义**：返回当前队列中未完成的任务数
-
-**source() / destination()**：
-
-- **目的**：获取流绑定的源地址和目标地址
-- **语义**：返回创建时绑定的地址信息
+- **目的**：执行所有已提交的传输任务
+- **返回值**：`Expected<void>`（成功或第一个错误）
+- **语义**：顺序执行队列中的所有 ranges，遇到错误立即返回
+- **约定**：执行后队列清空，失败时保留已完成的传输
 
 ### 2.5 设计原则
 
@@ -813,28 +797,22 @@ class IStream {
 public:
     virtual ~IStream() = default;
 
-    // 提交任务：
-    virtual Expected<uint64_t> submit(IoTask task) = 0;
+    // 单个提交：
+    virtual Expected<void> submit(uint64_t src, uint64_t dst, std::size_t size) = 0;
 
-    // 同步单个任务：
-    virtual Expected<std::size_t> synchronize(uint64_t task_id) = 0;
+    // 批量提交：
+    virtual Expected<void> submit(std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges) = 0;
 
-    // 同步所有任务：
-    virtual SyncResult synchronize() = 0;
-
-    // 取消任务：
-    virtual void cancel() = 0;
-
-    // 关闭流：
-    virtual void close() = 0;
-
-    // 查询方法：
-    virtual size_t pending_count() const = 0;
-    virtual bool is_open() const = 0;
-    virtual const AnyAddress& source() const = 0;
-    virtual const AnyAddress& destination() const = 0;
+    // 执行所有任务：
+    virtual Expected<void> synchronize() = 0;
 };
 ```
+
+**接口说明**：
+
+- **单个 submit**：提交单个传输任务，参数直接传递（无结构体）
+- **批量 submit**：提交多个传输任务，使用 vector<tuple<src, dst, size>>
+- **synchronize**：执行队列中所有任务，返回成功或第一个错误
 
 ### 3.4 Address<T>（地址 CRTP）
 
@@ -1119,71 +1097,6 @@ if (!result.ok()) {
     return;
 }
 auto stream = result.take_value();
-```
-
-### 3.7 任务相关结构
-
-#### 3.7.1 IoTask 定义
-
-IoTask 定义传输任务，支持多个源-目标组合：
-
-```cpp
-struct IoTask {
-    struct Range {
-        uint64_t src;      // 源地址偏移（字节）
-        uint64_t dst;      // 目标地址偏移（字节）
-        std::size_t size;  // 传输大小（字节）
-    };
-    std::vector<Range> ranges;  // 多个传输范围
-};
-
-// 示例：单个 range
-IoTask task1;
-task1.ranges = {{.src = 0, .dst = 0, .size = 1024}};
-stream->submit(task1);
-
-// 示例：多个 ranges（原子任务）
-IoTask task2;
-task2.ranges = {
-    {.src = 0, .dst = 0, .size = 500},
-    {.src = 500, .dst = 1000, .size = 500}
-};
-stream->submit(task2);  // 一个 task_id，原子执行
-```
-
-**语义说明**：
-
-- **原子性**：一个 IoTask 包含多个 Range，对应一个 task_id
-- **弱原子性**：如果某个 Range 失败，停止后续 Range 执行，已完成的保留
-- **入参检查**：空的 ranges 被视为无效任务，submit 返回 `ErrorCode::InvalidTask`
-
-#### 3.7.2 SyncResult 定义
-
-SyncResult 是批量任务结果：
-
-```cpp
-struct SyncResult {
-    size_t total_tasks = 0;        // 总任务数
-    size_t succeeded = 0;          // 成功任务数
-    size_t failed = 0;             // 失败任务数
-    size_t bytes_total = 0;        // 总传输字节数
-    Error first_error;             // 第一个错误
-    uint64_t first_failed_task_id = 0;  // 第一个失败任务 ID
-
-    bool ok() const { return first_error.ok(); }
-};
-
-// 使用：
-SyncResult result = stream->synchronize();
-std::cout << "Total tasks: " << result.total_tasks << std::endl;
-std::cout << "Succeeded: " << result.succeeded << std::endl;
-std::cout << "Failed: " << result.failed << std::endl;
-std::cout << "Bytes transferred: " << result.bytes_total << std::endl;
-
-if (!result.ok()) {
-    std::cerr << "First error: " << result.first_error.message
-              << " (task " << result.first_failed_task_id << ")" << std::endl;
-}
 ```
 
 ---
@@ -1480,171 +1393,115 @@ private:
 #### 步骤 3：实现 submit 方法
 
 ```cpp
-Expected<uint64_t> submit(IoTask task) override {
-    if (!open_) {
-        return Error{ErrorCode::StreamClosed, "Stream is closed"};
+Expected<void> submit(uint64_t src, uint64_t dst, std::size_t size) override {
+    if (!src_file_.is_open() || !dst_file_.is_open()) {
+        return Error{ErrorCode::StreamClosed, "File streams not open"};
     }
 
-    uint64_t id = next_task_id_++;
-    task_internal ti;
-    ti.task = task;
-    ti.id = id;
-    ti.completed = false;
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        tasks_[id] = ti;
+    if (size == 0) {
+        return Error{ErrorCode::InvalidTask, "Size is 0"};
     }
 
-    return id;
+    std::lock_guard<std::mutex> lock(mutex_);
+    ranges_.emplace_back(src, dst, size);
+    return Expected<void>();
+}
+
+Expected<void> submit(std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges) override {
+    if (!src_file_.is_open() || !dst_file_.is_open()) {
+        return Error{ErrorCode::StreamClosed, "File streams not open"};
+    }
+
+    if (ranges.empty()) {
+        return Error{ErrorCode::InvalidTask, "Ranges is empty"};
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& range : ranges) {
+        ranges_.push_back(range);
+    }
+    return Expected<void>();
 }
 ```
 
 #### 步骤 4：实现 synchronize 方法
 
 ```cpp
-Expected<std::size_t> synchronize(uint64_t task_id) override {
-    if (!open_) {
-        return Error{ErrorCode::StreamClosed, "Stream is closed"};
+Expected<void> synchronize() override {
+    if (!src_file_.is_open() || !dst_file_.is_open()) {
+        return Error{ErrorCode::StreamClosed, "File streams not open"};
     }
 
-    task_internal ti;
+    std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = tasks_.find(task_id);
-        if (it == tasks_.end()) {
-            return Error{ErrorCode::TaskNotFound, "Task not found"};
-        }
-        ti = std::move(it->second);
-        tasks_.erase(it);
+        ranges = std::move(ranges_);
+        ranges_.clear();
     }
 
-    execute_task(ti);  // 执行 HTTP 传输
-
-    return ti.bytes_transferred;
-}
-
-SyncResult synchronize() override {
-    if (!open_) {
-        return SyncResult{
-            .first_error = Error{ErrorCode::StreamClosed, "Stream is closed"}
-        };
-    }
-
-    std::vector<std::pair<uint64_t, task_internal>> tasks;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& [id, ti] : tasks_) {
-            tasks.emplace_back(id, std::move(ti));
-        }
-        tasks_.clear();
-    }
-
-    SyncResult result;
-    for (auto& [id, ti] : tasks) {
-        execute_task(ti);
-
-        result.bytes_total += ti.bytes_transferred;
-        if (ti.error.ok()) {
-            result.succeeded++;
-        } else {
-            result.failed++;
-            if (result.first_error.ok()) {
-                result.first_error = ti.error;
-                result.first_failed_task_id = id;
-            }
+    for (const auto& range : ranges) {
+        auto result = execute_range(range);
+        if (!result.ok()) {
+            return result.error();
         }
     }
 
-    return result;
+    return Expected<void>();
 }
 ```
 
-#### 步骤 5：实现其他接口方法
-
-```cpp
-void cancel() override {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& [id, ti] : tasks_) {
-        ti.error = Error{ErrorCode::Cancelled, "Task cancelled"};
-        ti.completed = true;
-    }
-}
-
-void close() override {
-    if (open_) {
-        open_ = false;
-        // 关闭 HTTP 连接
-        std::lock_guard<std::mutex> lock(mutex_);
-        tasks_.clear();
-    }
-}
-
-size_t pending_count() const override {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return tasks_.size();
-}
-
-bool is_open() const override { return open_; }
-
-const AnyAddress& source() const override { return src_wrapped_; }
-const AnyAddress& destination() const override { return dst_wrapped_; }
-```
-
-#### 步骤 6：添加成员变量和 execute_task
+#### 步骤 5：实现 execute_range 方法
 
 ```cpp
 private:
-    struct task_internal {
-        IoTask task;
-        uint64_t id;
-        bool completed;
-        size_t bytes_transferred = 0;
-        Error error;
-    };
+Expected<void> execute_range(const std::tuple<uint64_t, uint64_t, std::size_t>& range) {
+    uint64_t src_offset = std::get<0>(range);
+    uint64_t dst_offset = std::get<1>(range);
+    std::size_t size = std::get<2>(range);
 
-    void execute_task(task_internal& ti) {
-        // 实现 HTTP 传输逻辑
-        // 1. 从 src_ 读取数据（HTTP GET）
-        // 2. 写入 dst_（HTTP POST/PUT）
-        // 3. 处理超时、重试、错误
-
-        // 简化示例：
-        size_t total_transferred = 0;
-        size_t remaining = ti.task.size;
-
-        while (remaining > 0) {
-            size_t to_transfer = std::min(remaining, protocol_.buffer_size);
-
-            // HTTP 传输
-            bool success = http_transfer(
-                src_.url, dst_.url,
-                ti.task.src + total_transferred,
-                ti.task.dst + total_transferred,
-                to_transfer
-            );
-
-            if (!success) {
-                ti.error = Error{ErrorCode::IoError, "HTTP transfer failed"};
-                ti.bytes_transferred = total_transferred;
-                ti.completed = true;
-                return;
-            }
-
-            total_transferred += to_transfer;
-            remaining -= to_transfer;
-        }
-
-        ti.bytes_transferred = total_transferred;
-        ti.error = Error{};  // 成功
-        ti.completed = true;
+    if (size == 0) {
+        return Error{ErrorCode::InvalidTask, "Range size is 0"};
     }
 
-    std::map<uint64_t, task_internal> tasks_;
-    mutable std::mutex mutex_;
+    std::vector<char> buffer(protocol_.chunk_size);
+    src_file_.seekg(src_offset);
+    dst_file_.seekp(dst_offset);
 
-    // HTTP 连接相关成员
-    // 例如：HTTP session, socket, etc.
+    std::size_t remaining = size;
+    while (remaining > 0 && src_file_.good() && dst_file_.good()) {
+        std::size_t to_read = std::min(remaining, protocol_.chunk_size);
+        src_file_.read(buffer.data(), to_read);
+        std::size_t read_bytes = src_file_.gcount();
+
+        if (read_bytes == 0) {
+            break;
+        }
+
+        dst_file_.write(buffer.data(), read_bytes);
+        if (!dst_file_.good()) {
+            return Error{ErrorCode::DestinationWriteError, "Failed to write"};
+        }
+
+        remaining -= read_bytes;
+    }
+
+    return Expected<void>();
+}
+```
+
+#### 步骤 6：添加成员变量
+
+```cpp
+private:
+    HttpAddress src_;
+    HttpAddress dst_;
+    HttpProtocol protocol_;
+
+    std::ifstream src_file_;
+    std::ofstream dst_file_;
+
+    std::vector<std::tuple<uint64_t, uint64_t, std::size_t>> ranges_;
+    mutable std::mutex mutex_;
 };
 ```
 
@@ -1708,10 +1565,6 @@ REGISTER_TRANSFER_STREAM_WITH_PROTOCOL(Impl, SrcAddr, DstAddr, Protocol)
 target_sources(ucmtransfer PRIVATE
     detail/local_file_2_local_file_sendfile.cc
     detail/http_2_http_stream.cc           # 新增
-    detail/address/local_file.h            # 已有
-    detail/address/http_address.h          # 新增
-    detail/protocol/sendfile.h             # 已有
-    detail/protocol/http_protocol.h        # 新增
 )
 ```
 
@@ -1816,7 +1669,7 @@ int main() {
 
     // 2. 创建协议
     HttpProtocol protocol;
-    protocol.buffer_size = 16 * 1024;
+    protocol.chunk_size = 16 * 1024;
     protocol.timeout_seconds = 60;
 
     // 3. 创建 stream
@@ -1833,33 +1686,32 @@ int main() {
 
     auto stream = result.take_value();
 
-    // 4. 提交任务
-    IoTask task;
-    task.src = 0;
-    task.dst = 0;
-    task.size = 1024;
-
-    auto submit_result = stream->submit(task);
-    if (!submit_result.ok()) {
-        std::cerr << "Submit failed: " << submit_result.error().message << std::endl;
+    // 4. 单个提交
+    auto r1 = stream->submit(0, 0, 1024);
+    if (!r1.ok()) {
+        std::cerr << "Submit single failed: " << r1.error().message << std::endl;
         return 1;
     }
+    std::cout << "Submitted single: 0, 0, 1024" << std::endl;
 
-    uint64_t task_id = submit_result.value();
-    std::cout << "Task submitted: " << task_id << std::endl;
+    // 5. 批量提交
+    auto r2 = stream->submit({
+        {1024, 0, 512},
+        {1536, 0, 512}
+    });
+    if (!r2.ok()) {
+        std::cerr << "Submit batch failed: " << r2.error().message << std::endl;
+        return 1;
+    }
+    std::cout << "Submitted batch: {1024, 0, 512}, {1536, 0, 512}" << std::endl;
 
-    // 5. 同步等待
-    auto sync_result = stream->synchronize(task_id);
+    // 6. 执行所有任务
+    auto sync_result = stream->synchronize();
     if (!sync_result.ok()) {
-        std::cerr << "Task failed: " << sync_result.error().message << std::endl;
+        std::cerr << "Synchronize failed: " << sync_result.error().message << std::endl;
         return 1;
     }
-
-    std::cout << "Task succeeded: " << sync_result.value()
-              << " bytes transferred" << std::endl;
-
-    // 6. 关闭 stream
-    stream->close();
+    std::cout << "All tasks completed successfully" << std::endl;
 
     return 0;
 }
