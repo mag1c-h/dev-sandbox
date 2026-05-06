@@ -1125,23 +1125,37 @@ auto stream = result.take_value();
 
 #### 3.7.1 IoTask 定义
 
-IoTask 定义传输任务：
+IoTask 定义传输任务，支持多个源-目标组合：
 
 ```cpp
 struct IoTask {
-    uint64_t src;      // 源地址偏移（字节）
-    uint64_t dst;      // 目标地址偏移（字节）
-    size_t size;       // 传输大小（字节）
+    struct Range {
+        uint64_t src;      // 源地址偏移（字节）
+        uint64_t dst;      // 目标地址偏移（字节）
+        std::size_t size;  // 传输大小（字节）
+    };
+    std::vector<Range> ranges;  // 多个传输范围
 };
 
-// 示例：
-IoTask task;
-task.src = 0;          // 从源文件偏移 0 开始
-task.dst = 0;          // 写入目标文件偏移 0
-task.size = 1024;      // 传输 1KB
+// 示例：单个 range
+IoTask task1;
+task1.ranges = {{.src = 0, .dst = 0, .size = 1024}};
+stream->submit(task1);
 
-stream->submit(task);
+// 示例：多个 ranges（原子任务）
+IoTask task2;
+task2.ranges = {
+    {.src = 0, .dst = 0, .size = 500},
+    {.src = 500, .dst = 1000, .size = 500}
+};
+stream->submit(task2);  // 一个 task_id，原子执行
 ```
+
+**语义说明**：
+
+- **原子性**：一个 IoTask 包含多个 Range，对应一个 task_id
+- **弱原子性**：如果某个 Range 失败，停止后续 Range 执行，已完成的保留
+- **入参检查**：空的 ranges 被视为无效任务，submit 返回 `ErrorCode::InvalidTask`
 
 #### 3.7.2 SyncResult 定义
 

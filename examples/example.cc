@@ -47,7 +47,8 @@ int main()
 
     auto stream = create_result.take_value();
 
-    auto r1 = stream->submit(ucm::transfer::IoTask{.src = 0, .size = 10000});
+    auto r1 =
+        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 0, .dst = 0, .size = 10000}}});
     if (!r1) {
         std::cerr << "Submit task 1 failed: " << r1.error().message << std::endl;
         stream->close();
@@ -56,7 +57,8 @@ int main()
     uint64_t id1 = r1.take_value();
     std::cout << "Submitted task " << id1 << std::endl;
 
-    auto r2 = stream->submit(ucm::transfer::IoTask{.src = 10000, .size = 20000});
+    auto r2 =
+        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 10000, .dst = 0, .size = 20000}}});
     if (!r2) {
         std::cerr << "Submit task 2 failed: " << r2.error().message << std::endl;
         stream->close();
@@ -65,7 +67,8 @@ int main()
     uint64_t id2 = r2.take_value();
     std::cout << "Submitted task " << id2 << std::endl;
 
-    auto r3 = stream->submit(ucm::transfer::IoTask{.src = 30000, .size = 10000});
+    auto r3 =
+        stream->submit(ucm::transfer::IoTask{.ranges = {{.src = 30000, .dst = 0, .size = 10000}}});
     if (!r3) {
         std::cerr << "Submit task 3 failed: " << r3.error().message << std::endl;
         stream->close();

@@ -24,15 +24,19 @@
 
 #pragma once
 
+#include <vector>
 #include "address.h"
 #include "error.h"
 
 namespace ucm::transfer {
 
 struct IoTask {
-    uint64_t src;
-    uint64_t dst;
-    std::size_t size;
+    struct Range {
+        uint64_t src;
+        uint64_t dst;
+        std::size_t size;
+    };
+    std::vector<Range> ranges;
 };
 
 struct SyncResult {

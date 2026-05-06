@@ -54,6 +54,8 @@ public:
     {
         if (!open_) { return Error{ErrorCode::StreamClosed, "Stream is closed"}; }
 
+        if (task.ranges.empty()) { return Error{ErrorCode::InvalidTask, "IoTask ranges is empty"}; }
+
         uint64_t id = next_task_id_++;
         task_internal ti;
         ti.task = task;
@@ -179,22 +181,38 @@ private:
             return;
         }
 
-        uint64_t src_offset = ti.task.src;
-        uint64_t dst_offset = ti.task.dst;
+        size_t total_transferred = 0;
 
-        size_t size = ti.task.size;
-        if (size == 0) {
-            ti.error = Error{ErrorCode::InvalidTask, "Task size is 0"};
-            ti.completed = true;
-            return;
+        for (const auto& range : ti.task.ranges) {
+            auto result = execute_range(range);
+            if (!result.ok()) {
+                ti.error = result.error();
+                ti.bytes_transferred = total_transferred;
+                ti.completed = true;
+                return;
+            }
+            total_transferred += result.value();
         }
+
+        ti.bytes_transferred = total_transferred;
+        ti.error = Error{};
+        ti.completed = true;
+    }
+
+    Expected<std::size_t> execute_range(const IoTask::Range& range)
+    {
+        if (!src_file_.is_open() || !dst_file_.is_open()) {
+            return Error{ErrorCode::SourceNotFound, "File not open"};
+        }
+
+        if (range.size == 0) { return Error{ErrorCode::InvalidTask, "Range size is 0"}; }
 
         std::vector<char> buffer(protocol_.chunk_size);
 
-        src_file_.seekg(src_offset);
-        dst_file_.seekp(dst_offset);
+        src_file_.seekg(range.src);
+        dst_file_.seekp(range.dst);
 
-        size_t remaining = size;
+        size_t remaining = range.size;
         size_t total_transferred = 0;
 
         while (remaining > 0 && !src_file_.eof() && src_file_.good() && dst_file_.good()) {
@@ -207,20 +225,15 @@ private:
             dst_file_.write(buffer.data(), read_bytes);
 
             if (!dst_file_.good()) {
-                ti.error = Error{ErrorCode::DestinationWriteError, "Failed to write to destination",
-                                 errno};
-                ti.bytes_transferred = total_transferred;
-                ti.completed = true;
-                return;
+                return Error{ErrorCode::DestinationWriteError, "Failed to write to destination",
+                             errno};
             }
 
             total_transferred += read_bytes;
             remaining -= read_bytes;
         }
 
-        ti.bytes_transferred = total_transferred;
-        ti.error = Error{};
-        ti.completed = true;
+        return total_transferred;
     }
 
     FileAddress src_;
