@@ -1,5 +1,5 @@
-#ifndef GDRBW_SUBMIT_EXECUTOR_H
-#define GDRBW_SUBMIT_EXECUTOR_H
+#ifndef SUBMIT_EXECUTOR_GDR_H
+#define SUBMIT_EXECUTOR_GDR_H
 
 #include <condition_variable>
 #include <cstddef>
@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-#include "error_handle.h"
+#include "error_handle_gdr.h"
 
 class SubmitExecutor {
     struct Worker {
@@ -35,8 +35,8 @@ public:
     void Initialize(size_t workerCount)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        GDRBW_ASSERT(!initialized_);
-        GDRBW_ASSERT(workerCount > 0);
+        ASSERT(!initialized_);
+        ASSERT(workerCount > 0);
 
         workers_.reserve(workerCount);
         for (size_t index = 0; index < workerCount; ++index) {
@@ -54,8 +54,8 @@ public:
         std::vector<Worker*> selectedWorkers;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            GDRBW_ASSERT(initialized_);
-            GDRBW_ASSERT(workerCount <= workers_.size());
+            ASSERT(initialized_);
+            ASSERT(workerCount <= workers_.size());
             selectedWorkers.reserve(workerCount);
             for (size_t index = 0; index < workerCount; ++index) {
                 selectedWorkers.push_back(workers_[index].get());
@@ -66,7 +66,7 @@ public:
             auto* worker = selectedWorkers[index];
             {
                 std::lock_guard<std::mutex> lock(worker->mutex);
-                GDRBW_ASSERT(!worker->hasTask);
+                ASSERT(!worker->hasTask);
                 worker->task = [&task, index]() { task(index); };
                 worker->error = nullptr;
                 worker->done = false;
@@ -145,4 +145,4 @@ private:
     bool initialized_ = false;
 };
 
-#endif  // GDRBW_SUBMIT_EXECUTOR_H
+#endif  // SUBMIT_EXECUTOR_GDR_H

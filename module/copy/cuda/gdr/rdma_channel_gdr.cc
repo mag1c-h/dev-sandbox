@@ -21,16 +21,18 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#include "rdma_channel.h"
+#include "rdma_channel_gdr.h"
 
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <thread>
 
-#include "error_handle.h"
+#include "error_handle_gdr.h"
 
 namespace {
 
@@ -48,11 +50,11 @@ QPEndpoint QueryEndpoint(ibv_qp* queuePair, ibv_context* context)
     endpoint.qpn = queuePair->qp_num;
 
     ibv_port_attr portAttr = {};
-    GDRBW_IBV_ASSERT(ibv_query_port(context, kIbvPort, &portAttr));
+    GDR_IBV_ASSERT(ibv_query_port(context, kIbvPort, &portAttr));
     endpoint.lid = portAttr.lid;
 
     union ibv_gid gid = {};
-    GDRBW_IBV_ASSERT(ibv_query_gid(context, kIbvPort, 0, &gid));
+    GDR_IBV_ASSERT(ibv_query_gid(context, kIbvPort, 0, &gid));
     std::memcpy(endpoint.gid, &gid, sizeof(endpoint.gid));
     return endpoint;
 }
@@ -66,7 +68,7 @@ void ConnectQueuePair(ibv_qp* queuePair, const QPEndpoint& remoteEndpoint, bool 
         attr.pkey_index = 0;
         attr.port_num = kIbvPort;
         attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE;
-        GDRBW_IBV_ASSERT(ibv_modify_qp(
+        GDR_IBV_ASSERT(ibv_modify_qp(
             queuePair, &attr,
             IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS));
     }
@@ -92,7 +94,7 @@ void ConnectQueuePair(ibv_qp* queuePair, const QPEndpoint& remoteEndpoint, bool 
             attr.ah_attr.is_global = 0;
             attr.ah_attr.dlid = remoteEndpoint.lid;
         }
-        GDRBW_IBV_ASSERT(ibv_modify_qp(
+        GDR_IBV_ASSERT(ibv_modify_qp(
             queuePair, &attr,
             IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                 IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER));
@@ -106,7 +108,7 @@ void ConnectQueuePair(ibv_qp* queuePair, const QPEndpoint& remoteEndpoint, bool 
         attr.rnr_retry = 7;
         attr.sq_psn = 0;
         attr.max_rd_atomic = 1;
-        GDRBW_IBV_ASSERT(ibv_modify_qp(
+        GDR_IBV_ASSERT(ibv_modify_qp(
             queuePair, &attr,
             IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
                 IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC));
@@ -117,8 +119,8 @@ ibv_context* OpenNicContext(const std::string& nicName)
 {
     int deviceCount = 0;
     ibv_device** deviceList = ibv_get_device_list(&deviceCount);
-    GDRBW_ASSERT(deviceList != nullptr);
-    GDRBW_ASSERT(deviceCount > 0);
+    ASSERT(deviceList != nullptr);
+    ASSERT(deviceCount > 0);
 
     ibv_context* context = nullptr;
     for (int index = 0; index < deviceCount; ++index) {
@@ -130,7 +132,8 @@ ibv_context* OpenNicContext(const std::string& nicName)
 
     if (context == nullptr) {
         ibv_free_device_list(deviceList);
-        GdrbwThrowError("RDMA device not found: " + nicName);
+        std::fprintf(stderr, "RDMA device not found: %s\n", nicName.c_str());
+        std::exit(EXIT_FAILURE);
     }
 
     ibv_free_device_list(deviceList);
@@ -142,32 +145,32 @@ ibv_context* OpenNicContext(const std::string& nicName)
 RDMAChannel::RDMAChannel(int32_t deviceId, std::string nicName, const RDMAChannelConfig& config)
     : deviceId_(deviceId), nicName_(std::move(nicName))
 {
-    GDRBW_CUDA_ASSERT(cudaSetDevice(deviceId_));
-    GDRBW_ASSERT(config.cqDepth > 0);
-    GDRBW_ASSERT(config.qpSendWr > 0);
-    GDRBW_ASSERT(config.qpRecvWr > 0);
+    CUDA_ASSERT(cudaSetDevice(deviceId_));
+    ASSERT(config.cqDepth > 0);
+    ASSERT(config.qpSendWr > 0);
+    ASSERT(config.qpRecvWr > 0);
 
     context_ = OpenNicContext(nicName_);
-    GDRBW_ASSERT(context_ != nullptr);
+    ASSERT(context_ != nullptr);
 
     protectionDomain_ = ibv_alloc_pd(context_);
-    GDRBW_ASSERT(protectionDomain_ != nullptr);
+    ASSERT(protectionDomain_ != nullptr);
 
     ibv_port_attr portAttr = {};
-    GDRBW_IBV_ASSERT(ibv_query_port(context_, kIbvPort, &portAttr));
+    GDR_IBV_ASSERT(ibv_query_port(context_, kIbvPort, &portAttr));
     const bool isRoce = (portAttr.lid == 0);
 
     ibv_device_attr deviceAttr = {};
-    GDRBW_IBV_ASSERT(ibv_query_device(context_, &deviceAttr));
+    GDR_IBV_ASSERT(ibv_query_device(context_, &deviceAttr));
 
-    GDRBW_ASSERT(config.cqDepth <= static_cast<int>(deviceAttr.max_cqe));
-    GDRBW_ASSERT(config.qpSendWr <= static_cast<int>(deviceAttr.max_qp_wr));
-    GDRBW_ASSERT(config.qpRecvWr <= static_cast<int>(deviceAttr.max_qp_wr));
-    GDRBW_ASSERT(config.qpSendWr + config.qpRecvWr <= static_cast<int>(deviceAttr.max_qp_wr));
+    ASSERT(config.cqDepth <= static_cast<int>(deviceAttr.max_cqe));
+    ASSERT(config.qpSendWr <= static_cast<int>(deviceAttr.max_qp_wr));
+    ASSERT(config.qpRecvWr <= static_cast<int>(deviceAttr.max_qp_wr));
+    ASSERT(config.qpSendWr + config.qpRecvWr <= static_cast<int>(deviceAttr.max_qp_wr));
 
     const int cqDepth = config.cqDepth;
     completionQueue_ = ibv_create_cq(context_, cqDepth, nullptr, nullptr, 0);
-    GDRBW_ASSERT(completionQueue_ != nullptr);
+    ASSERT(completionQueue_ != nullptr);
 
     ibv_qp_init_attr qpInitAttr = {};
     qpInitAttr.send_cq = completionQueue_;
@@ -180,7 +183,7 @@ RDMAChannel::RDMAChannel(int32_t deviceId, std::string nicName, const RDMAChanne
     qpInitAttr.sq_sig_all = 0;
 
     queuePair_ = ibv_create_qp(protectionDomain_, &qpInitAttr);
-    GDRBW_ASSERT(queuePair_ != nullptr);
+    ASSERT(queuePair_ != nullptr);
 
     const auto cqWindow = static_cast<uint32_t>(std::max(1, cqDepth - 1));
     maxOutstandingWorkRequests_ = std::max<uint32_t>(
@@ -200,30 +203,30 @@ RDMAChannel::~RDMAChannel()
 
 ibv_mr* RDMAChannel::RegisterHostMemory(void* buffer, size_t bytes)
 {
-    GDRBW_ASSERT(buffer != nullptr);
-    GDRBW_ASSERT(bytes > 0);
+    ASSERT(buffer != nullptr);
+    ASSERT(bytes > 0);
     ibv_mr* memoryRegion =
         ibv_reg_mr(protectionDomain_, buffer, bytes, IBV_ACCESS_LOCAL_WRITE);
-    GDRBW_ASSERT(memoryRegion != nullptr);
+    ASSERT(memoryRegion != nullptr);
     return memoryRegion;
 }
 
 ibv_mr* RDMAChannel::RegisterGpuMemory(void* buffer, size_t bytes)
 {
-    GDRBW_ASSERT(buffer != nullptr);
-    GDRBW_ASSERT(bytes > 0);
-    GDRBW_CUDA_ASSERT(cudaSetDevice(deviceId_));
+    ASSERT(buffer != nullptr);
+    ASSERT(bytes > 0);
+    CUDA_ASSERT(cudaSetDevice(deviceId_));
     ibv_mr* memoryRegion = ibv_reg_mr(
         protectionDomain_, buffer, bytes, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-    GDRBW_ASSERT(memoryRegion != nullptr);
+    ASSERT(memoryRegion != nullptr);
     return memoryRegion;
 }
 
 uint64_t RDMAChannel::SubmitWrite(uint64_t localAddress, uint32_t localLKey, uint64_t remoteAddress,
                                   uint32_t remoteRKey, size_t bytes)
 {
-    GDRBW_ASSERT(bytes > 0);
-    GDRBW_ASSERT(bytes <= std::numeric_limits<uint32_t>::max());
+    ASSERT(bytes > 0);
+    ASSERT(bytes <= std::numeric_limits<uint32_t>::max());
 
     while (outstandingWorkRequests_ >= maxOutstandingWorkRequests_) { PollOneCompletion(); }
 
@@ -242,7 +245,7 @@ uint64_t RDMAChannel::SubmitWrite(uint64_t localAddress, uint32_t localLKey, uin
     workRequest.wr.rdma.rkey = remoteRKey;
 
     ibv_send_wr* badWorkRequest = nullptr;
-    GDRBW_IBV_ASSERT(ibv_post_send(queuePair_, &workRequest, &badWorkRequest));
+    GDR_IBV_ASSERT(ibv_post_send(queuePair_, &workRequest, &badWorkRequest));
 
     ++outstandingWorkRequests_;
     return nextWorkRequestId_++;
@@ -258,7 +261,7 @@ void RDMAChannel::PollOneCompletion()
     ibv_wc workCompletion = {};
     while (true) {
         const int pollResult = ibv_poll_cq(completionQueue_, 1, &workCompletion);
-        GDRBW_ASSERT(pollResult >= 0);
+        ASSERT(pollResult >= 0);
         if (pollResult == 0) {
             std::this_thread::yield();
             continue;
@@ -266,7 +269,7 @@ void RDMAChannel::PollOneCompletion()
         break;
     }
 
-    GDRBW_WC_ASSERT(workCompletion.status, workCompletion.wr_id);
+    GDR_WC_ASSERT(workCompletion.status, workCompletion.wr_id);
     completedWorkRequestId_ = std::max(completedWorkRequestId_, workCompletion.wr_id);
     if (outstandingWorkRequests_ > 0) { --outstandingWorkRequests_; }
 }
@@ -281,9 +284,9 @@ void ChannelManager::Initialize(int32_t deviceNumber, const std::vector<std::str
                                 const RDMAChannelConfig& config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    GDRBW_ASSERT(!initialized_);
-    GDRBW_ASSERT(deviceNumber > 0);
-    GDRBW_ASSERT(nicNames.size() == static_cast<size_t>(deviceNumber));
+    ASSERT(!initialized_);
+    ASSERT(deviceNumber > 0);
+    ASSERT(nicNames.size() == static_cast<size_t>(deviceNumber));
 
     channels_.clear();
     deviceIds_.clear();
@@ -299,9 +302,9 @@ void ChannelManager::Initialize(int32_t deviceNumber, const std::vector<std::str
 RDMAChannel& ChannelManager::Get(int32_t deviceId)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    GDRBW_ASSERT(initialized_);
+    ASSERT(initialized_);
     const auto it = channels_.find(deviceId);
-    GDRBW_ASSERT(it != channels_.end());
+    ASSERT(it != channels_.end());
     return *it->second;
 }
 

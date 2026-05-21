@@ -21,8 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * */
-#ifndef GDRBW_RDMA_CHANNEL_H
-#define GDRBW_RDMA_CHANNEL_H
+#ifndef RDMA_CHANNEL_GDR_H
+#define RDMA_CHANNEL_GDR_H
 
 #include <infiniband/verbs.h>
 #include <cstdint>
@@ -92,4 +92,4 @@ private:
     bool initialized_ = false;
 };
 
-#endif  // GDRBW_RDMA_CHANNEL_H
+#endif  // RDMA_CHANNEL_GDR_H
